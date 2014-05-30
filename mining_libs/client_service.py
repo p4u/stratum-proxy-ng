@@ -13,14 +13,18 @@ log = stratum.logger.get_logger('proxy')
 class ClientMiningService(GenericEventHandler):
     job_registry = None # Reference to JobRegistry instance
     timeout = None # Reference to IReactorTime object
+    f = None # Factory of Stratum client
+    ping_sent = False
     cf_counter = 0
     cf_path = None
     cf_notif = 10
-    backup_active_interval_max = 100
+    backup_active_interval_max = 20
     backup_active_interval = backup_active_interval_max
     controlled_disconnect = False
     new_custom_auth = False
     is_backup_active = False
+    use_dirty_ping = False
+    pool_timeout = 120
 
     @classmethod
     def set_controlled_disconnect(cls,c):
@@ -86,7 +90,23 @@ class ClientMiningService(GenericEventHandler):
             if not cls.timeout.called:
                 cls.timeout.cancel()
             cls.timeout = None
-        cls.timeout = reactor.callLater(2*60, cls.on_timeout)
+        cls.timeout = reactor.callLater(cls.pool_timeout, cls.on_timeout)
+
+    @classmethod
+    def on_ping_reply(cls,result):
+        cls.ping_sent = False
+        cls.reset_timeout()
+
+    @classmethod
+    def send_ping(cls):
+        if cls.f.client == None or not cls.f.client.connected:
+            cls.on_timeout()
+        else:
+            log.info("Sending ping to pool")
+            d = cls.f.rpc('mining.ping', [])
+            d.addCallback(cls.on_ping_reply)
+            d.addErrback(cls.on_ping_reply)
+            cls.timeout = reactor.callLater(5, cls.on_timeout)
 
     @classmethod
     def on_timeout(cls):
@@ -95,12 +115,18 @@ class ClientMiningService(GenericEventHandler):
             It will also drop all Stratum connections to sub-miners
             to indicate connection issues.
         '''
-        log.error("Connection to upstream pool timed out")
-        cls.reset_timeout()
-        cls.job_registry.f.reconnect()
-        cls.set_controlled_disconnect(False)
-        pool = list(cls.job_registry.f.main_host[::])
-        cls.job_registry.f.reconnect(pool[0], pool[1], None)
+        if (not cls.use_dirty_ping) or cls.ping_sent:
+            cls.ping_sent = False
+            log.error("Connection to upstream pool timed out")
+            cls.reset_timeout()
+            cls.job_registry.f.reconnect()
+            cls.set_controlled_disconnect(False)
+            pool = list(cls.job_registry.f.main_host[::])
+            cls.job_registry.f.reconnect(pool[0], pool[1], None)
+        else:
+            cls.ping_sent = True
+            cls.send_ping()
+
 
     def handle_event(self, method, params, connection_ref):
         '''Handle RPC calls and notifications from the pool'''

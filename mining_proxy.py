@@ -41,6 +41,8 @@ def parse_args():
     parser.add_argument('-cf', '--control-file', dest='cf_path', type=str, default=None, help='Control file path. If set proxy will check periodically for the contents of this file, if a new destination pool is specified in format pool:port, proxy will switch to this new pool.')
     parser.add_argument('--cf-interval', dest='cf_notif', type=int, default=10, help='Control file check interval (in pool notifications number). Low one implies more filesystem I/O and delays.')
     parser.add_argument('--idle', dest='set_idle', action='store_true', help='Close listening stratum ports in case connection with pool is lost (recover it later if success)')
+    parser.add_argument('--dirty-ping', dest='dirty_ping', action='store_true', help='Use dirty ping method to check if the pool is alive (not recommended).')
+    parser.add_argument('--timeout', dest='pool_timeout', type=int, default=120, help='Set pool timeout (in seconds).')
     parser.add_argument('--old-target', dest='old_target', action='store_true', help='Provides backward compatible targets for some deprecated getwork miners.')    
     parser.add_argument('--blocknotify', dest='blocknotify_cmd', type=str, default='', help='Execute command when the best block changes (%%s in BLOCKNOTIFY_CMD is replaced by block hash)')
     parser.add_argument('--sharenotify', dest='sharestats_module', type=str, default=None, help='Execute a python snippet when a share is accepted. Use absolute path (i.e /root/snippets/log.py)')
@@ -263,10 +265,11 @@ def main(args):
                 debug=args.verbose, proxy=proxy,
                 event_handler=client_service.ClientMiningService)
     
-    
     job_registry = jobs.JobRegistry(f, cmd=args.blocknotify_cmd, scrypt_target=args.scrypt_target,
                    no_midstate=args.no_midstate, real_target=args.real_target, use_old_target=args.old_target)
     client_service.ClientMiningService.job_registry = job_registry
+    client_service.ClientMiningService.use_dirty_ping = args.dirty_ping
+    client_service.ClientMiningService.pool_timeout = args.pool_timeout
     client_service.ClientMiningService.reset_timeout()
     if args.cf_path != None:
         log.info("Using pool control file %s" %args.cf_path)
@@ -279,7 +282,7 @@ def main(args):
     workers = worker_registry.WorkerRegistry(f)
     f.on_connect.addCallback(on_connect, workers, job_registry)
     f.on_disconnect.addCallback(on_disconnect, workers, job_registry)
-
+    client_service.ClientMiningService.f = f
 
     if args.test:
         f.on_connect.addCallback(test_launcher, job_registry)
