@@ -96,7 +96,7 @@ class StratumProxyService(GenericService):
     extranonce2_size = None
     tail_iterator = 0
     registered_tails= []
-    use_sharestats = False
+    use_sharenotify = False
 
     @classmethod
     def _set_upstream_factory(cls, f):
@@ -110,7 +110,7 @@ class StratumProxyService(GenericService):
     @classmethod
     def _set_sharestats_module(cls, module):
         if module != None and len(module) > 1:
-            cls.use_sharestats = True
+            cls.use_sharenotify = True
             sharestats.set_module(module)
     
     @classmethod
@@ -186,7 +186,7 @@ class StratumProxyService(GenericService):
         defer.returnValue(((subs1, subs2),) + (self.extranonce1+tail, extranonce2_size))
             
     @defer.inlineCallbacks
-    def submit(self, worker_name, job_id, extranonce2, ntime, nonce, *args):
+    def submit(self, origin_worker_name, job_id, extranonce2, ntime, nonce, *args):
         if self._f.client == None or not self._f.client.connected:
             raise SubmitException("Upstream not connected")
 
@@ -194,37 +194,38 @@ class StratumProxyService(GenericService):
         tail = session.get('tail')
         if tail == None:
             raise SubmitException("Connection is not subscribed")
-        
-        if self.use_sharestats:
-            sharestats.add_job(job_id,worker_name)
-            
+
         if self.custom_user != None:
             worker_name = self.custom_user
+            worker_log = ", custom user %s" %worker_name
+        else:
+            worker_name = origin_worker_name
+            worker_log = ""
 
         start = time.time()
         sharestats.print_stats()
 
         try:
+            job = self._f.event_handler.job_registry.get_job_from_id(job_id)
+            difficulty = job.diff if job != None else DifficultySubscription.difficulty
             result = (yield self._f.rpc('mining.submit', [worker_name, job_id, tail+extranonce2, ntime, nonce]))
         except RemoteServiceException as exc:
             # We got something from pool, reseting client_service timeout
             self._f.event_handler.reset_timeout()
 
             response_time = (time.time() - start) * 1000
-            log.info("[%dms] Share from '%s' REJECTED: %s" % (response_time, worker_name, str(exc)))
-            if self.use_sharestats: sharestats.del_job(job_id)
-            sharestats.rejected_jobs += 1
+            log.info("[%dms] Share from '%s' REJECTED: %s%s" % (response_time, origin_worker_name, str(exc),worker_log))
+            sharestats.register_job(job_id,origin_worker_name,difficulty,False,self.use_sharenotify)
             raise SubmitException(*exc.args)
 
         # We got something from pool, reseting client_service timeout
         self._f.event_handler.reset_timeout()
 
         response_time = (time.time() - start) * 1000
-        log.info("[%dms] Share from '%s' accepted, diff %d" % (response_time, worker_name, DifficultySubscription.difficulty))
-        if self.use_sharestats: sharestats.register_job(job_id,DifficultySubscription.difficulty)
-        sharestats.accepted_jobs += 1
+        log.info("[%dms] Share from '%s' accepted, diff %d%s" % (response_time, origin_worker_name, difficulty,worker_log))
+        sharestats.register_job(job_id,origin_worker_name,difficulty,True,self.use_sharenotify)
         defer.returnValue(result)
 
     def get_transactions(self, *args):
-        log.warn("mining.get_transactions isn't supported by proxy")
+        log.warn("mining.get_transactions is not supported")
         return []

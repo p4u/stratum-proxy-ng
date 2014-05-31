@@ -38,12 +38,12 @@ class Job(object):
         self.version = 1
         self.nbits = 0
         self.ntime_delta = 0
-        
+        self.diff = 1
         self.extranonce2 = 0
         self.merkle_to_extranonce2 = {} # Relation between merkle_hash and extranonce2
 
     @classmethod
-    def build_from_broadcast(cls, job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime):
+    def build_from_broadcast(cls, job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime, diff):
         '''Build job object from Stratum server broadcast'''
         job = Job()
         job.job_id = job_id
@@ -53,7 +53,8 @@ class Job(object):
         job.merkle_branch = [ binascii.unhexlify(tx) for tx in merkle_branch ]
         job.version = version
         job.nbits = nbits
-        job.ntime_delta = int(ntime, 16) - int(time.time()) 
+        job.ntime_delta = int(ntime, 16) - int(time.time())
+        job.diff = diff
         return job
 
     def increase_extranonce2(self):
@@ -121,7 +122,7 @@ class JobRegistry(object):
         self.target = int(dif1 / new_difficulty)
         self.target_hex = binascii.hexlify(utils.uint256_to_str(self.target))
         self.difficulty = new_difficulty
-        
+ 
     def build_full_extranonce(self, extranonce2):
         '''Join extranonce1 and extranonce2 together while padding
         extranonce2 length to extranonce2_size (provided by server).'''        
@@ -175,7 +176,15 @@ class JobRegistry(object):
         job = self.merkle_to_job[merkle_hash]
         extranonce2 = job.merkle_to_extranonce2[merkle_hash]
         return (job, extranonce2)
-        
+
+    def get_job_from_id(self,job_id):
+        job = None
+        for j in self.jobs:
+            if j.job_id == job_id:
+                job = j
+                break
+        return job
+
     def getwork(self, no_midstate=True):
         '''Miner requests for new getwork'''
         

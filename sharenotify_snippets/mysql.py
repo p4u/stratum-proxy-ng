@@ -4,7 +4,7 @@ db = MySQLdb.connect("127.0.0.1", "user", "password", "database")
 count = 0
 MySQL = MySQLdb
 
-def on_share(job_id, worker_name, init_time, dif):
+def on_share(job_id, worker_name, init_time, dif, accepted):
 	global count,db
 	if count > 100:
 		db.commit() # this might be the only commit

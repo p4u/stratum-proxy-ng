@@ -139,8 +139,8 @@ class ClientMiningService(GenericEventHandler):
             '''Proxy just received information about new mining job'''
             
             (job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime, clean_jobs) = params[:9]
+            diff = self.job_registry.difficulty
             #print len(str(params)), len(merkle_branch)
-            
             '''
             log.debug("Received new job #%s" % job_id)
             log.debug("prevhash = %s" % prevhash)
@@ -151,14 +151,14 @@ class ClientMiningService(GenericEventHandler):
             log.debug("coinb1 = %s" % coinb1)
             log.debug("coinb2 = %s" % coinb2)
             log.debug("merkle_branch = %s" % merkle_branch)
+            log.debug("difficulty = %s" % diff)
             '''
-        
             # Broadcast to Stratum clients
             stratum_listener.MiningSubscription.on_template(
                             job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime, clean_jobs)
             
             # Broadcast to getwork clients
-            job = Job.build_from_broadcast(job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime)
+            job = Job.build_from_broadcast(job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime, diff)
             log.info("New job %s for prevhash %s, clean_jobs=%s" % \
                  (job.job_id, utils.format_hash(job.prevhash), clean_jobs))
 
