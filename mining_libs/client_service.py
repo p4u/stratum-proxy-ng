@@ -4,7 +4,7 @@ from stratum.event_handler import GenericEventHandler
 from jobs import Job
 import utils
 import version as _version
-
+import time
 import stratum_listener
 
 import stratum.logger
@@ -25,6 +25,7 @@ class ClientMiningService(GenericEventHandler):
     is_backup_active = False
     use_dirty_ping = False
     pool_timeout = 120
+    authorized = None
 
     @classmethod
     def set_controlled_disconnect(cls,c):
@@ -127,7 +128,22 @@ class ClientMiningService(GenericEventHandler):
             cls.ping_sent = True
             cls.send_ping()
 
+    def _on_fail_authorized(self,worker_name)
+        log.exception("Cannot authorize worker '%s'" % worker_name)
+        self.authorized = False
+        
+    def _on_authorized(self,worker_name)
+        log.exception("Worker '%s' autorized by pool" % worker_name)
+        self.authorized = True
 
+    def authorize(self, worker_name, password):
+        self.authorized = None
+        d = self.f.rpc('mining.authorize', [worker_name, password])
+        d.addCallback(self._on_authorized, worker_name)
+        d.addErrback(self._on_fail_authorized, worker_name)
+        while self.authorized == None: pass time.sleep(0.1)
+        return self.authorized
+ 
     def handle_event(self, method, params, connection_ref):
         '''Handle RPC calls and notifications from the pool'''
 

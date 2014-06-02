@@ -153,12 +153,7 @@ class StratumProxyService(GenericService):
     def authorize(self, worker_name, worker_password, *args):
         if self._f.client == None or not self._f.client.connected:
             yield self._f.on_connect
-
-        if self.custom_user != None:
-            # Already subscribed by main()
-            defer.returnValue(True)
-        result = (yield self._f.rpc('mining.authorize', [worker_name, worker_password]))
-        defer.returnValue(result)
+        defer.returnValue(True)
 
     @defer.inlineCallbacks
     def subscribe(self, *args):    
