@@ -178,7 +178,6 @@ class StratumProxyService(GenericService):
         subs2 = Pubsub.subscribe(self.connection_ref(), MiningSubscription())[0]            
         log.info("Sending subscription to worker: %s/%s" %(self.job.extranonce1+tail, extranonce2_size))
         defer.returnValue(((subs1, subs2),) + (self.job.extranonce1+tail, extranonce2_size))
-        #defer.returnValue(((subs1, subs2),) + (self.extranonce1, self.extranonce2_size))
     
             
     @defer.inlineCallbacks

@@ -64,9 +64,9 @@ class Job(object):
         return r            
         
 class JobRegistry(object):   
-    def __init__(self, f, cmd, scrypt_target=False):
+    def __init__(self, f, scrypt_target=False):
         self.f = f
-        self.cmd = cmd # execute this command on new block
+        self.cmd = None # execute this command on new block
         self.scrypt_target = scrypt_target # calculate target for scrypt algorithm instead of sha256
         self.jobs = []        
         self.last_job = None
