@@ -92,6 +92,7 @@ def on_shutdown(f):
         
 
 def main(args):
+    global reactor
     if args.pid_file:
         fp = file(args.pid_file, 'w')
         fp.write(str(os.getpid()))
@@ -101,22 +102,26 @@ def main(args):
     stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
     stp.connect()
     
+  #  stp2 = StratumProxy()
+  #  stp2.set_pool(args.host,args.port,args.custom_user,args.custom_password)
+  #  stp2.connect()
+     
     # Setup stratum listener
     if args.stratum_port > 0:
-        stratum_listener.StratumProxyService._set_upstream_factory(stp.f)
-        stratum_listener.StratumProxyService._set_job_registry(stp.job_registry)
-        stratum_listener.StratumProxyService._set_custom_user(args.custom_user, args.custom_password)
+        stratum_listener.StratumProxyService._set_stratum_proxy(stp)
         stratum_listener.StratumProxyService._set_sharestats_module(args.sharestats_module)
+        
         reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
         reactor.addSystemEventTrigger('before', 'shutdown', on_shutdown, stp.f)
 
-    log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
+        log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
 
 
 class StratumProxy():
     f = None
-    job_registry = None
+    jobreg = None
     cservice = None
+    use_set_extranonce = False
     
     def __init__(self):
         self.log = stratum.logger.get_logger('proxy')
@@ -127,8 +132,8 @@ class StratumProxy():
         self.port = port
         self.cservice = client_service.ClientMiningService
         self.f = SocketTransportClientFactory(host, port,debug=True, event_handler=self.cservice)
-        self.job_registry = jobs.JobRegistry(self.f, scrypt_target=True)
-        self.cservice.job_registry = self.job_registry
+        self.jobreg = jobs.JobRegistry(self.f, scrypt_target=True)
+        self.cservice.job_registry = self.jobreg
         self.cservice.use_dirty_ping = False
         self.cservice.pool_timeout = 120
         self.cservice.reset_timeout()
@@ -149,11 +154,11 @@ class StratumProxy():
         # Subscribe for receiving jobs
         self.log.info("Subscribing for mining jobs")
         (_, extranonce1, extranonce2_size) = (yield self.f.rpc('mining.subscribe', []))[:3]
-        self.job_registry.set_extranonce(extranonce1, extranonce2_size)
+        self.jobreg.set_extranonce(extranonce1, extranonce2_size)
     
-        #if args.set_extranonce:
-        #    log.info("Enable extranonce subscription method")
-        #    f.rpc('mining.extranonce.subscribe', [])
+        if self.use_set_extranonce:
+            log.info("Enable extranonce subscription method")
+            f.rpc('mining.extranonce.subscribe', [])
     
         self.log.warning("Authorizing user %s, password %s" % self.cservice.auth)
         self.cservice.authorize(self.cservice.auth[0], self.cservice.auth[1])

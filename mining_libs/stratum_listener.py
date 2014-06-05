@@ -16,12 +16,6 @@ sharestats = ShareStats()
 import stratum.logger
 log = stratum.logger.get_logger('proxy')
 
-def var_int(i):
-    if i <= 0xff:
-        return struct.pack('>B', i)
-    elif i <= 0xffff:
-        return struct.pack('>H', i)
-    raise Exception("number is too big")
 
 class UpstreamServiceException(ServiceException):
     code = -2
@@ -88,101 +82,66 @@ class StratumProxyService(GenericService):
     service_type = 'mining'
     service_vendor = 'mining_proxy'
     is_default = True
-    
-    _f = None # Factory of upstream Stratum connection
-    job = None # Reference to JobRegistry
-    custom_user = None
-    custom_password = None
-    tail_iterator = 0
-    registered_tails= []
     use_sharenotify = False
+    stp = None
+   
+    @classmethod  
+    def _set_stratum_proxy(cls,stp):
+        cls.stp = stp
 
-    @classmethod
-    def _set_upstream_factory(cls, f):
-        cls._f = f
-    
-    @classmethod
-    def _set_job_registry(cls,j):
-        cls.job = j
-
-    @classmethod
-    def _set_custom_user(cls, custom_user, custom_password):
-        cls.custom_user = custom_user
-        cls.custom_password = custom_password
-    
+    @classmethod  
+    def _get_stratum_proxy(cls):
+        return cls.stp
+        
     @classmethod
     def _set_sharestats_module(cls, module):
         if module != None and len(module) > 1:
             cls.use_sharenotify = True
             sharestats.set_module(module)
-    
-    @classmethod
-    def _get_unused_tail(cls):
-        '''Currently adds up to two bytes to extranonce1,
-        limiting proxy for up to 65535 connected clients.'''
-        
-        for _ in range(0, 0xffff):  # 0-65535
-            cls.tail_iterator += 1
-            cls.tail_iterator %= 0xffff
-
-            # Zero extranonce is reserved for getwork connections
-            if cls.tail_iterator == 0:
-                cls.tail_iterator += 1
-
-            # var_int throws an exception when input is >= 0xffff
-            tail = var_int(cls.tail_iterator)
-            tail_len = len(tail)
-
-            if tail not in cls.registered_tails:
-                cls.registered_tails.append(tail)
-                return (binascii.hexlify(tail), cls.job.extranonce2_size - tail_len)
-            
-        raise Exception("Extranonce slots are full, please disconnect some miners!")
-    
-    def _drop_tail(self, result, tail):
-        tail = binascii.unhexlify(tail)
-        if tail in self.registered_tails:
-            self.registered_tails.remove(tail)
-        else:
-            log.error("Given extranonce is not registered1")
-        return result
-            
+           
     @defer.inlineCallbacks
     def authorize(self, worker_name, worker_password, *args):
-        if self._f.client == None or not self._f.client.connected:
-            yield self._f.on_connect
+        f = self._get_stratum_proxy().f
+        if f.client == None or not f.client.connected:
+            yield f.on_connect
         defer.returnValue(True)
 
     @defer.inlineCallbacks
     def subscribe(self, *args):    
-        if self._f.client == None or not self._f.client.connected:
-            yield self._f.on_connect
+        f = self._get_stratum_proxy().f
+        job = self._get_stratum_proxy().jobreg
+        
+        if f.client == None or not f.client.connected:
+            yield f.on_connect
             
-        if self._f.client == None or not self._f.client.connected:
+        if f.client == None or not f.client.connected:
             raise UpstreamServiceException("Upstream not connected")
          
-        if self.job.extranonce1 == None:
+        if job.extranonce1 == None:
             # This should never happen, because _f.on_connect is fired *after*
             # connection receive mining.subscribe response
             raise UpstreamServiceException("Not subscribed on upstream yet")
         
-        (tail, extranonce2_size) = self._get_unused_tail()
+        (tail, extranonce2_size) = job._get_unused_tail()
         
         session = self.connection_ref().get_session()
         session['tail'] = tail
                 
         # Remove extranonce from registry when client disconnect
-        self.connection_ref().on_disconnect.addCallback(self._drop_tail, tail)
+        self.connection_ref().on_disconnect.addCallback(job._drop_tail, tail)
 
         subs1 = Pubsub.subscribe(self.connection_ref(), DifficultySubscription())[0]
         subs2 = Pubsub.subscribe(self.connection_ref(), MiningSubscription())[0]            
-        log.info("Sending subscription to worker: %s/%s" %(self.job.extranonce1+tail, extranonce2_size))
-        defer.returnValue(((subs1, subs2),) + (self.job.extranonce1+tail, extranonce2_size))
+        log.info("Sending subscription to worker: %s/%s" %(job.extranonce1+tail, extranonce2_size))
+        defer.returnValue(((subs1, subs2),) + (job.extranonce1+tail, extranonce2_size))
     
-            
     @defer.inlineCallbacks
     def submit(self, origin_worker_name, job_id, extranonce2, ntime, nonce, *args):
-        if self._f.client == None or not self._f.client.connected:
+        f = self._get_stratum_proxy().f
+        job = self._get_stratum_proxy().jobreg
+        client = self._get_stratum_proxy().cservice
+        
+        if f.client == None or not f.client.connected:
             raise SubmitException("Upstream not connected")
 
         session = self.connection_ref().get_session()
@@ -190,27 +149,23 @@ class StratumProxyService(GenericService):
         if tail == None:
             raise SubmitException("Connection is not subscribed")
 
-        worker_name = self._f.event_handler.auth[0]
+        worker_name = client.auth[0]
 
         start = time.time()
         sharestats.print_stats()
+        # We got something from pool, reseting client_service timeout
+        client.reset_timeout()
 
         try:
-            job = self._f.event_handler.job_registry.get_job_from_id(job_id)
+            job = job.get_job_from_id(job_id)
             difficulty = job.diff if job != None else DifficultySubscription.difficulty
-            result = (yield self._f.rpc('mining.submit', [worker_name, job_id, tail+extranonce2, ntime, nonce]))
-            #result = (yield self._f.rpc('mining.submit', [worker_name, job_id, extranonce2, ntime, nonce]))
-        except RemoteServiceException as exc:
-            # We got something from pool, reseting client_service timeout
-            self._f.event_handler.reset_timeout()
+            result = (yield f.rpc('mining.submit', [worker_name, job_id, tail+extranonce2, ntime, nonce]))
 
+        except RemoteServiceException as exc:
             response_time = (time.time() - start) * 1000
             log.info("[%dms] Share from '%s' REJECTED: %s" % (response_time, worker_name, str(exc)))
             sharestats.register_job(job_id,origin_worker_name,difficulty,False,self.use_sharenotify)
             raise SubmitException(*exc.args)
-
-        # We got something from pool, reseting client_service timeout
-        self._f.event_handler.reset_timeout()
 
         response_time = (time.time() - start) * 1000
         log.info("[%dms] Share from '%s' accepted, diff %d" % (response_time, worker_name, difficulty))
