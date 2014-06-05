@@ -90,10 +90,9 @@ class StratumProxyService(GenericService):
     is_default = True
     
     _f = None # Factory of upstream Stratum connection
+    job = None # Reference to JobRegistry
     custom_user = None
     custom_password = None
-    extranonce1 = None
-    extranonce2_size = None
     tail_iterator = 0
     registered_tails= []
     use_sharenotify = False
@@ -101,6 +100,10 @@ class StratumProxyService(GenericService):
     @classmethod
     def _set_upstream_factory(cls, f):
         cls._f = f
+    
+    @classmethod
+    def _set_job_registry(cls,j):
+        cls.job = j
 
     @classmethod
     def _set_custom_user(cls, custom_user, custom_password):
@@ -113,11 +116,6 @@ class StratumProxyService(GenericService):
             cls.use_sharenotify = True
             sharestats.set_module(module)
     
-    @classmethod
-    def _set_extranonce(cls, extranonce1, extranonce2_size):
-        cls.extranonce1 = extranonce1
-        cls.extranonce2_size = extranonce2_size
-        
     @classmethod
     def _get_unused_tail(cls):
         '''Currently adds up to two bytes to extranonce1,
@@ -137,7 +135,7 @@ class StratumProxyService(GenericService):
 
             if tail not in cls.registered_tails:
                 cls.registered_tails.append(tail)
-                return (binascii.hexlify(tail), cls.extranonce2_size - tail_len)
+                return (binascii.hexlify(tail), cls.job.extranonce2_size - tail_len)
             
         raise Exception("Extranonce slots are full, please disconnect some miners!")
     
@@ -163,7 +161,7 @@ class StratumProxyService(GenericService):
         if self._f.client == None or not self._f.client.connected:
             raise UpstreamServiceException("Upstream not connected")
          
-        if self.extranonce1 == None:
+        if self.job.extranonce1 == None:
             # This should never happen, because _f.on_connect is fired *after*
             # connection receive mining.subscribe response
             raise UpstreamServiceException("Not subscribed on upstream yet")
@@ -178,7 +176,10 @@ class StratumProxyService(GenericService):
 
         subs1 = Pubsub.subscribe(self.connection_ref(), DifficultySubscription())[0]
         subs2 = Pubsub.subscribe(self.connection_ref(), MiningSubscription())[0]            
-        defer.returnValue(((subs1, subs2),) + (self.extranonce1+tail, extranonce2_size))
+        log.info("Sending subscription to worker: %s/%s" %(self.job.extranonce1+tail, extranonce2_size))
+        defer.returnValue(((subs1, subs2),) + (self.job.extranonce1+tail, extranonce2_size))
+        #defer.returnValue(((subs1, subs2),) + (self.extranonce1, self.extranonce2_size))
+    
             
     @defer.inlineCallbacks
     def submit(self, origin_worker_name, job_id, extranonce2, ntime, nonce, *args):
@@ -204,6 +205,7 @@ class StratumProxyService(GenericService):
             job = self._f.event_handler.job_registry.get_job_from_id(job_id)
             difficulty = job.diff if job != None else DifficultySubscription.difficulty
             result = (yield self._f.rpc('mining.submit', [worker_name, job_id, tail+extranonce2, ntime, nonce]))
+            #result = (yield self._f.rpc('mining.submit', [worker_name, job_id, extranonce2, ntime, nonce]))
         except RemoteServiceException as exc:
             # We got something from pool, reseting client_service timeout
             self._f.event_handler.reset_timeout()

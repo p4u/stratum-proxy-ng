@@ -128,25 +128,25 @@ class ClientMiningService(GenericEventHandler):
             cls.ping_sent = True
             cls.send_ping()
 
-    def _on_fail_authorized(self,worker_name)
+    @classmethod
+    def _on_fail_authorized(self,resp,worker_name):
         log.exception("Cannot authorize worker '%s'" % worker_name)
         self.authorized = False
-        
-    def _on_authorized(self,worker_name)
-        log.exception("Worker '%s' autorized by pool" % worker_name)
+
+    @classmethod
+    def _on_authorized(self,resp,worker_name):
+        log.info("Worker '%s' autorized by pool" % worker_name)
         self.authorized = True
 
+    @classmethod
     def authorize(self, worker_name, password):
         self.authorized = None
         d = self.f.rpc('mining.authorize', [worker_name, password])
         d.addCallback(self._on_authorized, worker_name)
         d.addErrback(self._on_fail_authorized, worker_name)
-        while self.authorized == None: pass time.sleep(0.1)
-        return self.authorized
- 
+
     def handle_event(self, method, params, connection_ref):
         '''Handle RPC calls and notifications from the pool'''
-
         # Yay, we received something from the pool,
         # let's restart the timeout.
         self.reset_timeout()
@@ -183,7 +183,6 @@ class ClientMiningService(GenericEventHandler):
         elif method == 'mining.set_difficulty':
             difficulty = params[0]
             log.info("Setting new difficulty: %s" % difficulty)
-            
             stratum_listener.DifficultySubscription.on_new_difficulty(difficulty)
             self.job_registry.set_difficulty(difficulty)
                     

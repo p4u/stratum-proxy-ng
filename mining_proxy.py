@@ -28,7 +28,6 @@ def parse_args():
     parser.add_argument('-p', '--port', dest='port', type=int, default=3333, help='Port of Stratum mining pool')
     parser.add_argument('-sh', '--stratum-host', dest='stratum_host', type=str, default='0.0.0.0', help='On which network interface listen for stratum miners. Use "localhost" for listening on internal IP only.')
     parser.add_argument('-sp', '--stratum-port', dest='stratum_port', type=int, default=3333, help='Port on which port listen for stratum miners.')
-    parser.add_argument('-nm', '--no-midstate', dest='no_midstate', action='store_true', help="Don't compute midstate for getwork. This has outstanding performance boost, but some old miners like Diablo don't work without midstate.")
     parser.add_argument('-b', '--backup', dest='backup_pool', type=str, default=False, help='Stratum mining pool used as backup in format host:port.')
     parser.add_argument('-cl', '--custom-lp', dest='custom_lp', type=str, help='Override URL provided in X-Long-Polling header')
     parser.add_argument('-cs', '--custom-stratum', dest='custom_stratum', type=str, help='Override URL provided in X-Stratum header')
@@ -79,7 +78,6 @@ from stratum.services import ServiceEventHandler
 from twisted.web.server import Site
 
 from mining_libs import stratum_listener
-from mining_libs import getwork_listener
 from mining_libs import client_service
 from mining_libs import jobs
 from mining_libs import multicast_responder
@@ -95,7 +93,7 @@ def on_shutdown(f):
     f.is_reconnecting = False # Don't let stratum factory to reconnect again
     
 @defer.inlineCallbacks
-def on_connect(f, job_registry):
+def on_connect(f, job_registry, cservice):
     '''Callback when proxy get connected to the pool'''
     global IDLE
     log.info("Connected to Stratum pool at %s:%d" % f.main_host)
@@ -106,7 +104,7 @@ def on_connect(f, job_registry):
         reactor_listen.startListening()
 
     # Hook to on_connect again
-    f.on_connect.addCallback(on_connect, job_registry)
+    f.on_connect.addCallback(on_connect, job_registry, cservice)
     
     # Subscribe for receiving jobs
     log.info("Subscribing for mining jobs")
@@ -117,41 +115,42 @@ def on_connect(f, job_registry):
         f.rpc('mining.extranonce.subscribe', [])
 
     job_registry.set_extranonce(extranonce1, extranonce2_size)
-    stratum_listener.StratumProxyService._set_extranonce(extranonce1, extranonce2_size)
     
     if args.custom_user:
-        if f.event_handler.new_custom_auth:
-            user,password = f.event_handler.new_custom_auth
+        if cservice.new_custom_auth:
+            user,password = cservice.new_custom_auth
         else:
             user = args.custom_user
             password = args.custom_password
         log.warning("Authorizing custom user %s, password %s" % (user, password))
-        if not f.event_handler.authorize(user, password):
-            reactor_listen.stopListening()
-            f.reconnect()
-            
+        cservice.authorize(user, password)
         stratum_listener.StratumProxyService._set_custom_user(user, password)
 
     # Set controlled disconnect to False
-    f.event_handler.controlled_disconnect = False
-
+    cservice.controlled_disconnect = False
     defer.returnValue(f)
 
-def on_disconnect(f, job_registry):
+def control():
+    if cservice.authorized == False:
+            log.error("Cannot authorize user %s, password %s" % (user, password))
+            reactor_listen.stopListening()
+            f.reconnect()
+        
+def on_disconnect(f, job_registry, cservice):
     '''Callback when proxy get disconnected from the pool'''
     global IDLE, backup_pool, original_pool
-    f.on_disconnect.addCallback(on_disconnect, job_registry)
+    f.on_disconnect.addCallback(on_disconnect, job_registry, cservice)
 
-    if not f.event_handler.controlled_disconnect:
+    if not cservice.controlled_disconnect:
         log.info("Disconnected from Stratum pool at %s:%d" % f.main_host)
         stratum_listener.MiningSubscription.disconnect_all()
     
-    if not f.event_handler.controlled_disconnect and IDLE != None:
+    if not cservice.controlled_disconnect and IDLE != None:
         log.info("Entering in IDLE state")
         reactor_listen.stopListening()
         IDLE=True
 
-    if (not f.event_handler.controlled_disconnect) and backup_pool:
+    if (not cservice.controlled_disconnect) and backup_pool:
         host = backup_pool.split(':')[0]
         port = int(backup_pool.split(':')[1])
         log.info("Backup pool configured, trying to stablish connection with %s" %backup_pool)
@@ -161,9 +160,9 @@ def on_disconnect(f, job_registry):
         aux_pool = backup_pool
         backup_pool = original_pool
         original_pool = aux_pool
-        f.event_handler.is_backup_active = not f.event_handler.is_backup_active
+        cservice.is_backup_active = not f.event_handler.is_backup_active
 
-    if f.event_handler.controlled_disconnect:
+    if cservice.controlled_disconnect:
         log.info("Sending reconnect order to workers")
         stratum_listener.MiningSubscription.reconnect_all()
 
@@ -188,32 +187,32 @@ def main(args):
         proxy = None
 
     log.warning("Trying to connect to Stratum pool at %s:%d" % (args.host, args.port))        
-        
+    
+    cservice = client_service.ClientMiningService
+    
     # Connect to Stratum pool
     f = SocketTransportClientFactory(args.host, args.port,
-                debug=args.verbose, proxy=proxy,
-                event_handler=client_service.ClientMiningService)
+                debug=args.verbose, proxy=proxy, event_handler=cservice)
     
-    job_registry = jobs.JobRegistry(f, cmd=args.blocknotify_cmd, scrypt_target=args.scrypt_target,
-                   no_midstate=args.no_midstate, real_target=args.real_target, use_old_target=args.old_target)
+    job_registry = jobs.JobRegistry(f, cmd=args.blocknotify_cmd, scrypt_target=args.scrypt_target)
     
-    client_service.ClientMiningService.job_registry = job_registry
-    client_service.ClientMiningService.use_dirty_ping = args.dirty_ping
-    client_service.ClientMiningService.pool_timeout = args.pool_timeout
-    client_service.ClientMiningService.reset_timeout()
+    cservice.job_registry = job_registry
+    cservice.use_dirty_ping = args.dirty_ping
+    cservice.pool_timeout = args.pool_timeout
+    cservice.reset_timeout()
 
     if args.cf_path != None:
         log.info("Using pool control file %s" %args.cf_path)
-    client_service.ClientMiningService.cf_path = args.cf_path
-    client_service.ClientMiningService.cf_notif = args.cf_notif
+    cservice.cf_path = args.cf_path
+    cservice.cf_notif = args.cf_notif
 
     if args.custom_user != None:
-        client_service.ClientMiningService.new_custom_auth = (args.custom_user, args.custom_password)
+        cservice.new_custom_auth = (args.custom_user, args.custom_password)
 
-    f.on_connect.addCallback(on_connect, job_registry)
-    f.on_disconnect.addCallback(on_disconnect, job_registry)
+    f.on_connect.addCallback(on_connect, job_registry, cservice)
+    f.on_disconnect.addCallback(on_disconnect, job_registry, cservice)
     
-    client_service.ClientMiningService.f = f
+    cservice.f = f
 
     # Cleanup properly on shutdown
     reactor.addSystemEventTrigger('before', 'shutdown', on_shutdown, f)
@@ -224,6 +223,7 @@ def main(args):
     # Setup stratum listener
     if args.stratum_port > 0:
         stratum_listener.StratumProxyService._set_upstream_factory(f)
+        stratum_listener.StratumProxyService._set_job_registry(job_registry)
         stratum_listener.StratumProxyService._set_custom_user(args.custom_user, args.custom_password)
         stratum_listener.StratumProxyService._set_sharestats_module(args.sharestats_module)
         reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
