@@ -190,12 +190,7 @@ class StratumProxyService(GenericService):
         if tail == None:
             raise SubmitException("Connection is not subscribed")
 
-        if self.custom_user != None:
-            worker_name = self.custom_user
-            worker_log = ", custom user %s" %worker_name
-        else:
-            worker_name = origin_worker_name
-            worker_log = ""
+        worker_name = self._f.event_handler.auth[0]
 
         start = time.time()
         sharestats.print_stats()
@@ -210,7 +205,7 @@ class StratumProxyService(GenericService):
             self._f.event_handler.reset_timeout()
 
             response_time = (time.time() - start) * 1000
-            log.info("[%dms] Share from '%s' REJECTED: %s%s" % (response_time, origin_worker_name, str(exc),worker_log))
+            log.info("[%dms] Share from '%s' REJECTED: %s" % (response_time, worker_name, str(exc)))
             sharestats.register_job(job_id,origin_worker_name,difficulty,False,self.use_sharenotify)
             raise SubmitException(*exc.args)
 
@@ -218,7 +213,7 @@ class StratumProxyService(GenericService):
         self._f.event_handler.reset_timeout()
 
         response_time = (time.time() - start) * 1000
-        log.info("[%dms] Share from '%s' accepted, diff %d%s" % (response_time, origin_worker_name, difficulty,worker_log))
+        log.info("[%dms] Share from '%s' accepted, diff %d" % (response_time, worker_name, difficulty))
         sharestats.register_job(job_id,origin_worker_name,difficulty,True,self.use_sharenotify)
         defer.returnValue(result)
 

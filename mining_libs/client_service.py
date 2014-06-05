@@ -21,7 +21,7 @@ class ClientMiningService(GenericEventHandler):
     backup_active_interval_max = 20
     backup_active_interval = backup_active_interval_max
     controlled_disconnect = False
-    new_custom_auth = False
+    auth = False
     is_backup_active = False
     use_dirty_ping = False
     pool_timeout = 120
@@ -62,12 +62,12 @@ class ClientMiningService(GenericEventHandler):
                     if len(sdata) > 1:
                         user = sdata[1].split(':')[0]
                         passw =  sdata[1].split(':')[1]
-                        if cls.new_custom_auth:
-                            if user != cls.new_custom_auth[0] or passw != cls.new_custom_auth[1]:
-                                cls.new_custom_auth = (user,passw)
+                        if cls.auth:
+                            if user != cls.auth[0] or passw != cls.auth[1]:
+                                cls.auth = (user,passw)
                                 new_user_pass = True
                         else:
-                            cls.new_custom_auth = (user,passw)
+                            cls.auth = (user,passw)
                             new_user_pass = True
                 new = list(cls.job_registry.f.main_host[::])
                 log.info("Current pool is %s:%d" % tuple(new))
@@ -75,7 +75,7 @@ class ClientMiningService(GenericEventHandler):
                     new[0] = host
                     new[1] = port
                     log.info("Found new pool configuration on host control file, reconnecting to %s:%d" % tuple(new))
-                    log.info("New custom authorization data found %s:%s" %cls.new_custom_auth)
+                    log.info("New custom authorization data found %s:%s" %cls.auth)
                     cls.set_controlled_disconnect(True)
                     cls.job_registry.f.reconnect(new[0], new[1], None)
 

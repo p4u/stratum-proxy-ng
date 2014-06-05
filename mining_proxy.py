@@ -79,10 +79,10 @@ from mining_libs import utils
 import stratum.logger
 log = stratum.logger.get_logger('proxy')
 
-#def on_shutdown(f):
-#    '''Clean environment properly'''
-#    log.info("Shutting down proxy...")
-#    f.is_reconnecting = False # Don't let stratum factory to reconnect again
+def on_shutdown(f):
+    '''Clean environment properly'''
+    log.info("Shutting down proxy...")
+    f.is_reconnecting = False # Don't let stratum factory to reconnect again
     
 #def control():
 #    if cservice.authorized == False:
@@ -92,15 +92,15 @@ log = stratum.logger.get_logger('proxy')
         
 
 def main(args):
-    global reactor_listen
     if args.pid_file:
         fp = file(args.pid_file, 'w')
         fp.write(str(os.getpid()))
         fp.close()
     
     stp = StratumProxy()
-    stp.connect_pool(args.host,args.port,args.custom_user,args.custom_password)
-
+    stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
+    stp.connect()
+    
     # Setup stratum listener
     if args.stratum_port > 0:
         stratum_listener.StratumProxyService._set_upstream_factory(stp.f)
@@ -108,6 +108,7 @@ def main(args):
         stratum_listener.StratumProxyService._set_custom_user(args.custom_user, args.custom_password)
         stratum_listener.StratumProxyService._set_sharestats_module(args.sharestats_module)
         reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
+        reactor.addSystemEventTrigger('before', 'shutdown', on_shutdown, stp.f)
 
     log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
 
@@ -115,16 +116,15 @@ def main(args):
 class StratumProxy():
     f = None
     job_registry = None
+    cservice = None
     
     def __init__(self):
         self.log = stratum.logger.get_logger('proxy')
        
-    def connect_pool(self,host,port,user,passw):
+    def set_pool(self,host,port,user,passw):
         self.log.warning("Trying to connect to Stratum pool at %s:%d" % (host, port))        
         self.host = host
         self.port = port
-        self.user = user
-        self.passw = passw
         self.cservice = client_service.ClientMiningService
         self.f = SocketTransportClientFactory(host, port,debug=True, event_handler=self.cservice)
         self.job_registry = jobs.JobRegistry(self.f, scrypt_target=True)
@@ -132,12 +132,12 @@ class StratumProxy():
         self.cservice.use_dirty_ping = False
         self.cservice.pool_timeout = 120
         self.cservice.reset_timeout()
-        self.cservice.new_custom_auth = (user, passw)
+        self.cservice.auth = (user, passw)
         self.cservice.f = self.f
         self.f.on_connect.addCallback(self.on_connect)
         self.f.on_disconnect.addCallback(self.on_disconnect)
     
-        # Block until proxy connect to the pool
+    def connect(self):
         self.f.on_connect
 
     @defer.inlineCallbacks
@@ -155,8 +155,8 @@ class StratumProxy():
         #    log.info("Enable extranonce subscription method")
         #    f.rpc('mining.extranonce.subscribe', [])
     
-        self.log.warning("Authorizing custom user %s, password %s" % (self.user, self.passw))
-        self.cservice.authorize(self.user, self.passw)
+        self.log.warning("Authorizing user %s, password %s" % self.cservice.auth)
+        self.cservice.authorize(self.cservice.auth[0], self.cservice.auth[1])
     
         # Set controlled disconnect to False
         self.cservice.controlled_disconnect = False
