@@ -96,7 +96,7 @@ class StratumProxyService(GenericService):
     service_vendor = 'mining_proxy'
     is_default = True
     use_sharenotify = False
-    stp = None
+    stp = None # Reference to StratumProxy instance
    
     @classmethod  
     def _set_stratum_proxy(cls,stp):

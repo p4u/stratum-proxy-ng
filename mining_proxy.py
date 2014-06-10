@@ -34,9 +34,6 @@ def parse_args():
     parser.add_argument('-cs', '--custom-stratum', dest='custom_stratum', type=str, help='Override URL provided in X-Stratum header')
     parser.add_argument('-cu', '--custom-user', dest='custom_user', type=str, help='Use this username for submitting shares')
     parser.add_argument('-cp', '--custom-password', dest='custom_password', type=str, help='Use this password for submitting shares')
-    parser.add_argument('--set-extranonce', dest='set_extranonce', action='store_true', help='Enable set extranonce method from stratum pool')
-    parser.add_argument('-cf', '--control-file', dest='cf_path', type=str, default=None, help='Control file path. If set proxy will check periodically for the contents of this file, if a new destination pool is specified in format pool:port, proxy will switch to this new pool.')
-    parser.add_argument('--cf-interval', dest='cf_notif', type=int, default=10, help='Control file check interval (in pool notifications number). Low one implies more filesystem I/O and delays.')
     parser.add_argument('--idle', dest='set_idle', action='store_true', help='Close listening stratum ports in case connection with pool is lost (recover it later if success)')
     parser.add_argument('--dirty-ping', dest='dirty_ping', action='store_true', help='Use dirty ping method to check if the pool is alive (not recommended).')
     parser.add_argument('--timeout', dest='pool_timeout', type=int, default=120, help='Set pool timeout (in seconds).')
@@ -76,6 +73,7 @@ from mining_libs import client_service
 from mining_libs import jobs
 from mining_libs import version
 from mining_libs import utils
+import zmq
 
 import stratum.logger
 log = stratum.logger.get_logger('proxy')
@@ -96,27 +94,21 @@ def on_shutdown(f):
                 log.error(str(thread.getName()) + ' could not be terminated')
 
 def control(stp,stl):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    z = zmq.Context()
+    s = z.socket(zmq.REQ)
+    s.bind("tcp://127.0.0.1:3999")
     while not shutdown:
-        s.bind(("127.0.0.1", 3999))
-        s.listen(1)
-        conn, addr = s.accept()
-        log.info('Connected')
-        while not shutdown:
-            data = conn.recv(1024)
-            if not data: break
-            conn.sendall('OK')
-            conn.close()
-        log.info("Received: %s" %data)
-    s.shutdown(socket.SHUT_RD)
-
+        s.send('READY')
+        msg = s.recv()
+        log.info("Control message received: %s" %msg)
+        margs = msg.split()
+        if margs[0] == 'setpool':
+            # host, port, user, passw
+            stl.MiningSubscription.reconnect_all()
+            if len(margs) == 3: stp.reconnect(margs[1],int(margs[2]))
+            if len(margs) == 4: stp.reconnect(margs[1],int(margs[2]),user=margs[3])
+            if len(margs) == 5: stp.reconnect(margs[1],int(margs[2]),user=margs[3],passw=margs[4])
     #stl.MiningSubscription.print_subs()
-    #stp.reconnect(host="us.clevermining.com",port=3333)
-    #stratum_listener.MiningSubscription.reconnect_all()
-#    if cservice.authorized == False:
-#            log.error("Cannot authorize user %s, password %s" % (user, password))
-#            reactor_listen.stopListening()
-#            f.reconnect()
 
 def main(args):
     global reactor
@@ -124,14 +116,10 @@ def main(args):
         fp = file(args.pid_file, 'w')
         fp.write(str(os.getpid()))
         fp.close()
-    
+
     stp = StratumProxy()
     stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
     stp.connect()
-
-  #  stp2 = StratumProxy()
-  #  stp2.set_pool(args.host,args.port,args.custom_user,args.custom_password)
-  #  stp2.connect()
     st_listen = stratum_listener
     threading.Thread(target=control,args=[stp,st_listen]).start()
 
@@ -153,14 +141,17 @@ class StratumProxy():
     def __init__(self):
         self.log = stratum.logger.get_logger('proxy')
 
-    def set_pool(self,host,port,user,passw):
-        self.log.warning("Trying to connect to Stratum pool at %s:%d" % (host, port))        
-        self.host = host
-        self.port = port
+    def _detect_set_extranonce(self):
         self.use_set_extranonce = False
         for pool in self.set_extranonce_pools:
             if self.host.find(pool) > 0:
                 self.use_set_extranonce = True
+
+    def set_pool(self,host,port,user,passw):
+        self.log.warning("Trying to connect to Stratum pool at %s:%d" % (host, port))
+        self.host = host
+        self.port = int(port)
+        self._detect_set_extranonce()
         self.cservice = client_service.ClientMiningService
         self.f = SocketTransportClientFactory(host, port,debug=True, event_handler=self.cservice)
         self.jobreg = jobs.JobRegistry(self.f, scrypt_target=True)
@@ -173,6 +164,16 @@ class StratumProxy():
         self.f.on_connect.addCallback(self.on_connect)
         self.f.on_disconnect.addCallback(self.on_disconnect)
     
+    def reconnect(self,host,port,user=None,passw=None):
+        self.host = host
+        self.port = int(port)
+        self._detect_set_extranonce()
+        cuser,cpassw = self.cservice.auth
+        if not user: user = self.cuser
+        if not passw: passw = self.cpassw
+        self.cservice.auth = (user, passw)
+        self.f.reconnect(host, port, None)
+
     def connect(self):
         self.f.on_connect
 
