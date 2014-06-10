@@ -21,6 +21,7 @@ import argparse
 import time
 import os
 import socket
+import threading
 
 def parse_args():
     parser = argparse.ArgumentParser(description='This proxy allows you to run getwork-based miners against Stratum mining pool.')
@@ -78,18 +79,44 @@ from mining_libs import utils
 
 import stratum.logger
 log = stratum.logger.get_logger('proxy')
+shutdown = False
 
 def on_shutdown(f):
+    global shutdown
+    shutdown = True
     '''Clean environment properly'''
     log.info("Shutting down proxy...")
     f.is_reconnecting = False # Don't let stratum factory to reconnect again
-    
-#def control():
+    time.sleep(1)
+    for thread in threading.enumerate():
+        if thread.isAlive():
+            try:
+                thread._Thread__stop()
+            except:
+                log.error(str(thread.getName()) + ' could not be terminated')
+
+def control(stp,stl):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    while not shutdown:
+        s.bind(("127.0.0.1", 3999))
+        s.listen(1)
+        conn, addr = s.accept()
+        log.info('Connected')
+        while not shutdown:
+            data = conn.recv(1024)
+            if not data: break
+            conn.sendall('OK')
+            conn.close()
+        log.info("Received: %s" %data)
+    s.shutdown(socket.SHUT_RD)
+
+    #stl.MiningSubscription.print_subs()
+    #stp.reconnect(host="us.clevermining.com",port=3333)
+    #stratum_listener.MiningSubscription.reconnect_all()
 #    if cservice.authorized == False:
 #            log.error("Cannot authorize user %s, password %s" % (user, password))
 #            reactor_listen.stopListening()
 #            f.reconnect()
-        
 
 def main(args):
     global reactor
@@ -101,35 +128,39 @@ def main(args):
     stp = StratumProxy()
     stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
     stp.connect()
-    
+
   #  stp2 = StratumProxy()
   #  stp2.set_pool(args.host,args.port,args.custom_user,args.custom_password)
   #  stp2.connect()
-     
+    st_listen = stratum_listener
+    threading.Thread(target=control,args=[stp,st_listen]).start()
+
     # Setup stratum listener
     if args.stratum_port > 0:
-        stratum_listener.StratumProxyService._set_stratum_proxy(stp)
-        stratum_listener.StratumProxyService._set_sharestats_module(args.sharestats_module)
-        
+        st_listen.StratumProxyService._set_stratum_proxy(stp)
+        st_listen.StratumProxyService._set_sharestats_module(args.sharestats_module)
         reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
         reactor.addSystemEventTrigger('before', 'shutdown', on_shutdown, stp.f)
-
         log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
-
 
 class StratumProxy():
     f = None
     jobreg = None
     cservice = None
     use_set_extranonce = False
-    
+    set_extranonce_pools = ['nicehash.com']
+
     def __init__(self):
         self.log = stratum.logger.get_logger('proxy')
-       
+
     def set_pool(self,host,port,user,passw):
         self.log.warning("Trying to connect to Stratum pool at %s:%d" % (host, port))        
         self.host = host
         self.port = port
+        self.use_set_extranonce = False
+        for pool in self.set_extranonce_pools:
+            if self.host.find(pool) > 0:
+                self.use_set_extranonce = True
         self.cservice = client_service.ClientMiningService
         self.f = SocketTransportClientFactory(host, port,debug=True, event_handler=self.cservice)
         self.jobreg = jobs.JobRegistry(self.f, scrypt_target=True)
@@ -145,29 +176,36 @@ class StratumProxy():
     def connect(self):
         self.f.on_connect
 
+    def reconnect(self,host=None,port=None):
+        if not host or not port:
+            self.f.reconnect()
+        else:
+            self.host = host
+            self.port = port
+            self.f.reconnect(host,port,None)
+
     @defer.inlineCallbacks
     def on_connect(self,f):
         '''Callback when proxy get connected to the pool'''
         # Hook to on_connect again
         f.on_connect.addCallback(self.on_connect)
-        
+
         # Subscribe for receiving jobs
         self.log.info("Subscribing for mining jobs")
         (_, extranonce1, extranonce2_size) = (yield self.f.rpc('mining.subscribe', []))[:3]
         self.jobreg.set_extranonce(extranonce1, extranonce2_size)
-    
+
         if self.use_set_extranonce:
             log.info("Enable extranonce subscription method")
             f.rpc('mining.extranonce.subscribe', [])
-    
+
         self.log.warning("Authorizing user %s, password %s" % self.cservice.auth)
         self.cservice.authorize(self.cservice.auth[0], self.cservice.auth[1])
-    
+
         # Set controlled disconnect to False
         self.cservice.controlled_disconnect = False
         defer.returnValue(f)
-    
-    @defer.inlineCallbacks
+
     def on_disconnect(self,f):
         '''Callback when proxy get disconnected from the pool'''
         f.on_disconnect.addCallback(self.on_disconnect)

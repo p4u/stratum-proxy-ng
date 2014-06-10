@@ -210,9 +210,9 @@ class ClientMiningService(GenericEventHandler):
             except:
                 log.error("Wrong extranonce information got from pool, ignoring")
                 return False
-            stratum_listener.StratumProxyService._set_extranonce(extranonce1, int(extranonce2_size))
-            stratum_listener.MiningSubscription.reconnect_all()
+#            stratum_listener.StratumProxyService._set_extranonce(extranonce1, int(extranonce2_size))
             self.job_registry.set_extranonce(extranonce1, int(extranonce2_size))
+            stratum_listener.MiningSubscription.reconnect_all()
 
             return True
         

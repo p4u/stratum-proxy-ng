@@ -23,6 +23,12 @@ class UpstreamServiceException(ServiceException):
 class SubmitException(ServiceException):
     code = -2
 
+class ReconnectSubscription(Subscription):
+    event = 'mining.reconnect'
+    @classmethod
+    def reconnect(cls):
+        cls.emit([])
+
 class DifficultySubscription(Subscription):
     event = 'mining.set_difficulty'
     difficulty = 1
@@ -40,7 +46,6 @@ class MiningSubscription(Subscription):
     logic for broadcasting new jobs to the clients.'''
     
     event = 'mining.notify'
-    
     last_broadcast = None
     
     @classmethod
@@ -54,6 +59,14 @@ class MiningSubscription(Subscription):
         for subs in Pubsub.iterate_subscribers(cls.event):
             if subs.connection_ref().transport != None:
                 subs.connection_ref().transport.loseConnection()
+
+    @classmethod
+    def print_subs(cls):
+        c = Pubsub.get_subscription_count(cls.event)
+        log.info(c)
+        for subs in Pubsub.iterate_subscribers(cls.event):
+            s = Pubsub.get_subscription(subs.connection_ref(), cls.event, key=None)
+            log.info(s)
 
     @classmethod
     def on_template(cls, job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime, clean_jobs):
