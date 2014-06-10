@@ -177,14 +177,6 @@ class StratumProxy():
     def connect(self):
         self.f.on_connect
 
-    def reconnect(self,host=None,port=None):
-        if not host or not port:
-            self.f.reconnect()
-        else:
-            self.host = host
-            self.port = port
-            self.f.reconnect(host,port,None)
-
     @defer.inlineCallbacks
     def on_connect(self,f):
         '''Callback when proxy get connected to the pool'''
