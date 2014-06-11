@@ -104,11 +104,10 @@ def control(stp,stl):
         margs = msg.split()
         if margs[0] == 'setpool':
             # host, port, user, passw
-            stl.MiningSubscription.reconnect_all()
+            #stl.MiningSubscription.reconnect_all()
             if len(margs) == 3: stp.reconnect(margs[1],int(margs[2]))
             if len(margs) == 4: stp.reconnect(margs[1],int(margs[2]),user=margs[3])
             if len(margs) == 5: stp.reconnect(margs[1],int(margs[2]),user=margs[3],passw=margs[4])
-    #stl.MiningSubscription.print_subs()
 
 def watcher(stp,stl):
     while not shutdown:
@@ -121,6 +120,7 @@ def watcher(stp,stl):
         accepted_ratio = float((stp.sharestats.accepted_jobs*100) / total_jobs)
         log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%% | Num clients: %s' \
             %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,conn))
+        #stl.MiningSubscription.print_subs()
         time.sleep(10)
 
 def main(args):
@@ -130,10 +130,10 @@ def main(args):
         fp.write(str(os.getpid()))
         fp.close()
 
-    stp = StratumProxy()
+    st_listen = stratum_listener
+    stp = StratumProxy(st_listen)
     stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
     stp.connect()
-    st_listen = stratum_listener
     threading.Thread(target=control,args=[stp,st_listen]).start()
     threading.Thread(target=watcher,args=[stp,st_listen]).start()
 
@@ -152,8 +152,9 @@ class StratumProxy():
     use_set_extranonce = False
     set_extranonce_pools = ['nicehash.com']
 
-    def __init__(self):
+    def __init__(self,stl):
         self.log = stratum.logger.get_logger('proxy')
+        self.stl = stl
 
     def _detect_set_extranonce(self):
         self.use_set_extranonce = False
@@ -220,8 +221,8 @@ class StratumProxy():
         if not self.cservice.controlled_disconnect:
             self.log.error("Disconnected from Stratum pool at %s:%d" % self.f.main_host)
         if self.cservice.controlled_disconnect:
-            log.info("Sending reconnect order to workers")
-            #stratum_listener.MiningSubscription.reconnect_all()
+            log.info("Controlled disconnect detected")
+        self.stl.MiningSubscription.reconnect_all()
         return f
 
 if __name__ == '__main__':
