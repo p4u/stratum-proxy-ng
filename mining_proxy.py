@@ -73,75 +73,77 @@ from mining_libs import version
 from mining_libs import utils
 from mining_libs import share_stats
 import zmq
-
 import stratum.logger
-log = stratum.logger.get_logger('proxy')
-shutdown = False
 
-def on_shutdown(f):
-    global shutdown
-    shutdown = True
-    '''Clean environment properly'''
-    log.info("Shutting down proxy...")
-    f.is_reconnecting = False # Don't let stratum factory to reconnect again
-    time.sleep(1)
-    for thread in threading.enumerate():
-        if thread.isAlive():
-            try:
-                thread._Thread__stop()
-            except:
-                log.error(str(thread.getName()) + ' could not be terminated')
+class StratumServer():
+    shutdown = False
+    log = None
 
-def control(stp,stl):
-    z = zmq.Context()
-    s = z.socket(zmq.REQ)
-    s.bind("tcp://127.0.0.1:3999")
-    while not shutdown:
-        s.send('READY')
-        msg = s.recv()
-        log.info("Control message received: %s" %msg)
-        margs = msg.split()
-        if margs[0] == 'setpool':
-            # host, port, user, passw
-            #stl.MiningSubscription.reconnect_all()
-            if len(margs) == 3: stp.reconnect(margs[1],int(margs[2]))
-            if len(margs) == 4: stp.reconnect(margs[1],int(margs[2]),user=margs[3])
-            if len(margs) == 5: stp.reconnect(margs[1],int(margs[2]),user=margs[3],passw=margs[4])
+    def __init__(self,args):
+        if args.pid_file:
+            fp = file(args.pid_file, 'w')
+            fp.write(str(os.getpid()))
+            fp.close()
+        self.log = stratum.logger.get_logger('proxy')
+        st_listen = stratum_listener
+        stp = StratumProxy(st_listen)
+        stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
+        stp.connect()
+        threading.Thread(target=self.control,args=[stp,st_listen]).start()
+        threading.Thread(target=self.watcher,args=[stp,st_listen]).start()
 
-def watcher(stp,stl):
-    while not shutdown:
-        conn = stl.MiningSubscription.get_num_connections()
-        last_job_secs = stp.sharestats.get_last_job_secs()
-        notify_time = stp.cservice.get_last_notify_secs()
-        total_jobs = stp.sharestats.rejected_jobs+stp.sharestats.accepted_jobs
-        if total_jobs == 0: total_jobs = 1
-        rejected_ratio = float((stp.sharestats.rejected_jobs*100) / total_jobs)
-        accepted_ratio = float((stp.sharestats.accepted_jobs*100) / total_jobs)
-        log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%% | Num clients: %s' \
-            %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,conn))
-        #stl.MiningSubscription.print_subs()
-        time.sleep(10)
+        # Setup stratum listener
+        if args.stratum_port > 0:
+            st_listen.StratumProxyService._set_stratum_proxy(stp)
+            st_listen.StratumProxyService._set_sharestats_module(args.sharestats_module)
+            reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
+            reactor.addSystemEventTrigger('before', 'shutdown', self.on_shutdown, stp.f)
+            self.log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
+            reactor.run()
 
-def main(args):
-    if args.pid_file:
-        fp = file(args.pid_file, 'w')
-        fp.write(str(os.getpid()))
-        fp.close()
+    def on_shutdown(self,f):
+        self.shutdown = True
+        '''Clean environment properly'''
+        self.log.info("Shutting down proxy...")
+        f.is_reconnecting = False # Don't let stratum factory to reconnect again
+        time.sleep(1)
+        for thread in threading.enumerate():
+            if thread.isAlive():
+                try:
+                    thread._Thread__stop()
+                except:
+                    self.log.error(str(thread.getName()) + ' could not be terminated')
 
-    st_listen = stratum_listener
-    stp = StratumProxy(st_listen)
-    stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
-    stp.connect()
-    threading.Thread(target=control,args=[stp,st_listen]).start()
-    threading.Thread(target=watcher,args=[stp,st_listen]).start()
+    def control(self,stp,stl):
+        z = zmq.Context()
+        s = z.socket(zmq.REQ)
+        s.bind("tcp://127.0.0.1:3999")
+        while not self.shutdown:
+            s.send('READY')
+            msg = s.recv()
+            self.log.info("Control message received: %s" %msg)
+            margs = msg.split()
+            if margs[0] == 'setpool':
+                # host, port, user, passw
+                #stl.MiningSubscription.reconnect_all()
+                if len(margs) == 3: stp.reconnect(margs[1],int(margs[2]))
+                if len(margs) == 4: stp.reconnect(margs[1],int(margs[2]),user=margs[3])
+                if len(margs) == 5: stp.reconnect(margs[1],int(margs[2]),user=margs[3],passw=margs[4])
 
-    # Setup stratum listener
-    if args.stratum_port > 0:
-        st_listen.StratumProxyService._set_stratum_proxy(stp)
-        st_listen.StratumProxyService._set_sharestats_module(args.sharestats_module)
-        reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
-        reactor.addSystemEventTrigger('before', 'shutdown', on_shutdown, stp.f)
-        log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
+    def watcher(self,stp,stl):
+        while not self.shutdown:
+            conn = stl.MiningSubscription.get_num_connections()
+            last_job_secs = stp.sharestats.get_last_job_secs()
+            notify_time = stp.cservice.get_last_notify_secs()
+            total_jobs = stp.sharestats.rejected_jobs+stp.sharestats.accepted_jobs
+            if total_jobs == 0: total_jobs = 1
+            rejected_ratio = float((stp.sharestats.rejected_jobs*100) / total_jobs)
+            accepted_ratio = float((stp.sharestats.accepted_jobs*100) / total_jobs)
+            self.log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%% | Num clients: %s' \
+                %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,conn))
+            #stl.MiningSubscription.print_subs()
+            time.sleep(10)
+
 
 class StratumProxy():
     f = None
@@ -224,5 +226,5 @@ class StratumProxy():
         return f
 
 if __name__ == '__main__':
-    main(args)
-    reactor.run()
+    ss = StratumServer(args)
+    
