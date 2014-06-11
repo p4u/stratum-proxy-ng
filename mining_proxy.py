@@ -29,7 +29,6 @@ def parse_args():
     parser.add_argument('-p', '--port', dest='port', type=int, default=3333, help='Port of Stratum mining pool')
     parser.add_argument('-sh', '--stratum-host', dest='stratum_host', type=str, default='0.0.0.0', help='On which network interface listen for stratum miners. Use "localhost" for listening on internal IP only.')
     parser.add_argument('-sp', '--stratum-port', dest='stratum_port', type=int, default=3333, help='Port on which port listen for stratum miners.')
-    parser.add_argument('-b', '--backup', dest='backup_pool', type=str, default=False, help='Stratum mining pool used as backup in format host:port.')
     parser.add_argument('-cs', '--custom-stratum', dest='custom_stratum', type=str, help='Override URL provided in X-Stratum header')
     parser.add_argument('-cu', '--custom-user', dest='custom_user', type=str, help='Use this username for submitting shares')
     parser.add_argument('-cp', '--custom-password', dest='custom_password', type=str, help='Use this password for submitting shares')
@@ -124,7 +123,6 @@ def watcher(stp,stl):
         time.sleep(10)
 
 def main(args):
-    global reactor
     if args.pid_file:
         fp = file(args.pid_file, 'w')
         fp.write(str(os.getpid()))

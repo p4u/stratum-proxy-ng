@@ -23,7 +23,6 @@ class Job(object):
         self.ntime_delta = 0
         self.diff = 1
         self.extranonce2 = 0
-        self.merkle_to_extranonce2 = {} # Relation between merkle_hash and extranonce2
 
     @classmethod
     def build_from_broadcast(cls, job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime, diff):
@@ -44,25 +43,6 @@ class Job(object):
         self.extranonce2 += 1
         return self.extranonce2
 
-    def build_coinbase(self, extranonce):
-        return self.coinb1_bin + extranonce + self.coinb2_bin
-    
-    def build_merkle_root(self, coinbase_hash):
-        merkle_root = coinbase_hash
-        for h in self.merkle_branch:
-            merkle_root = utils.doublesha(merkle_root + h)
-        return merkle_root
-    
-    def serialize_header(self, merkle_root, ntime, nonce):
-        r =  self.version
-        r += self.prevhash
-        r += merkle_root
-        r += binascii.hexlify(struct.pack(">I", ntime))
-        r += self.nbits
-        r += binascii.hexlify(struct.pack(">I", nonce))
-        r += '000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000' # padding    
-        return r            
-        
 class JobRegistry(object):   
     tail_iterator = 0
     registered_tails= []
