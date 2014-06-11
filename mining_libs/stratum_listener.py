@@ -1,21 +1,13 @@
 import time
 import binascii
 import struct
-
 from twisted.internet import defer
-
 from stratum.services import GenericService
 from stratum.pubsub import Pubsub, Subscription
 from stratum.custom_exceptions import ServiceException, RemoteServiceException
-
 from jobs import JobRegistry
-
-from share_stats import ShareStats
-sharestats = ShareStats()
-
 import stratum.logger
 log = stratum.logger.get_logger('proxy')
-
 
 class UpstreamServiceException(ServiceException):
     code = -2
@@ -69,6 +61,10 @@ class MiningSubscription(Subscription):
             log.info(s)
 
     @classmethod
+    def get_num_connections(cls):
+        return Pubsub.get_subscription_count(cls.event)
+
+    @classmethod
     def on_template(cls, job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime, clean_jobs):
         '''Push new job to subscribed clients'''
         cls.last_broadcast = (job_id, prevhash, coinb1, coinb2, merkle_branch, version, nbits, ntime, clean_jobs)
@@ -110,7 +106,7 @@ class StratumProxyService(GenericService):
     def _set_sharestats_module(cls, module):
         if module != None and len(module) > 1:
             cls.use_sharenotify = True
-            sharestats.set_module(module)
+            cls.stp.sharestats.set_module(module)
            
     @defer.inlineCallbacks
     def authorize(self, worker_name, worker_password, *args):
@@ -165,7 +161,6 @@ class StratumProxyService(GenericService):
         worker_name = client.auth[0]
 
         start = time.time()
-        sharestats.print_stats()
         # We got something from pool, reseting client_service timeout
         client.reset_timeout()
 
@@ -177,12 +172,12 @@ class StratumProxyService(GenericService):
         except RemoteServiceException as exc:
             response_time = (time.time() - start) * 1000
             log.info("[%dms] Share from '%s' REJECTED: %s" % (response_time, worker_name, str(exc)))
-            sharestats.register_job(job_id,origin_worker_name,difficulty,False,self.use_sharenotify)
+            self.stp.sharestats.register_job(job_id,origin_worker_name,difficulty,False,self.use_sharenotify)
             raise SubmitException(*exc.args)
 
         response_time = (time.time() - start) * 1000
         log.info("[%dms] Share from '%s' accepted, diff %d" % (response_time, worker_name, difficulty))
-        sharestats.register_job(job_id,origin_worker_name,difficulty,True,self.use_sharenotify)
+        self.stp.sharestats.register_job(job_id,origin_worker_name,difficulty,True,self.use_sharenotify)
         defer.returnValue(result)
 
     def get_transactions(self, *args):

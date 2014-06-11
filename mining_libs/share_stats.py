@@ -1,4 +1,5 @@
 import time
+import datetime
 import stratum.logger
 import subprocess
 import threading
@@ -8,23 +9,11 @@ class ShareStats(object):
     def __init__(self):
         self.accepted_jobs = 0
         self.rejected_jobs = 0
-        self.accepted_ratio = 0
-        self.rejected_ratio = 0
         self.lock = threading.Lock()
+        self.last_job_time = datetime.datetime.now()
 
-    def print_stats(self):
-        # Calculate and print job statistics
-        total_jobs = self.rejected_jobs+self.accepted_jobs
-        if total_jobs > 0 and (total_jobs)%10 == 0:
-            self.rejected_ratio = (self.rejected_jobs*100) / total_jobs
-            self.accepted_ratio = (self.accepted_jobs*100) / total_jobs
-            log.info("\n\n[Share stats] Accepted:%s%% Rejected:%s%%\n" %(self.accepted_ratio,self.rejected_ratio))
-
-            # Reseting counters
-            if total_jobs >= 65535:
-                self.accepted_jobs = 0
-                self.rejected_jobs = 0
-                log.info("[Share stats] Reseting statistics")
+    def get_last_job_secs(self):
+        return  int((datetime.datetime.now() - self.last_job_time).total_seconds())
 
     def set_module(self,module):
         try:
@@ -41,6 +30,11 @@ class ShareStats(object):
           self.on_share = do_nothing
 
     def register_job(self,job_id,worker_name,dif,accepted,sharenotify):
+        if self.accepted_jobs + self.rejected_jobs >= 65535:
+            self.accepted_jobs = 0
+            self.rejected_jobs = 0
+            log.info("[Share stats] Reseting statistics")
+        self.last_job_time = datetime.datetime.now()
         if accepted: self.accepted_jobs += 1
         else: self.rejected_jobs += 1
         self._execute_snippet(job_id,worker_name,dif,accepted)

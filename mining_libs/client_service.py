@@ -5,6 +5,7 @@ from jobs import Job
 import utils
 import version as _version
 import time
+import datetime
 import stratum_listener
 
 import stratum.logger
@@ -26,10 +27,18 @@ class ClientMiningService(GenericEventHandler):
     use_dirty_ping = False
     pool_timeout = 120
     authorized = None
+    last_notify_time = None
 
     @classmethod
     def set_controlled_disconnect(cls,c):
         cls.controlled_disconnect = c
+
+    @classmethod
+    def get_last_notify_secs(cls):
+        s = 0
+        if cls.last_notify_time != None:
+            s = int((datetime.datetime.now() - cls.last_notify_time).total_seconds())
+        return s
 
     @classmethod
     def check_control_file(cls):
@@ -86,6 +95,8 @@ class ClientMiningService(GenericEventHandler):
 
     @classmethod
     def reset_timeout(cls):
+        cls.last_notify_time = datetime.datetime.now()
+
         cls.check_control_file()
         if cls.timeout != None:
             if not cls.timeout.called:
@@ -210,7 +221,6 @@ class ClientMiningService(GenericEventHandler):
             except:
                 log.error("Wrong extranonce information got from pool, ignoring")
                 return False
-#            stratum_listener.StratumProxyService._set_extranonce(extranonce1, int(extranonce2_size))
             self.job_registry.set_extranonce(extranonce1, int(extranonce2_size))
             stratum_listener.MiningSubscription.reconnect_all()
 

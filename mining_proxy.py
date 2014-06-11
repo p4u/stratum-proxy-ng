@@ -72,6 +72,7 @@ from mining_libs import client_service
 from mining_libs import jobs
 from mining_libs import version
 from mining_libs import utils
+from mining_libs import share_stats
 import zmq
 
 import stratum.logger
@@ -109,6 +110,19 @@ def control(stp,stl):
             if len(margs) == 5: stp.reconnect(margs[1],int(margs[2]),user=margs[3],passw=margs[4])
     #stl.MiningSubscription.print_subs()
 
+def watcher(stp,stl):
+    while not shutdown:
+        conn = stl.MiningSubscription.get_num_connections()
+        last_job_secs = stp.sharestats.get_last_job_secs()
+        notify_time = stp.cservice.get_last_notify_secs()
+        total_jobs = stp.sharestats.rejected_jobs+stp.sharestats.accepted_jobs
+        if total_jobs == 0: total_jobs = 1
+        rejected_ratio = float((stp.sharestats.rejected_jobs*100) / total_jobs)
+        accepted_ratio = float((stp.sharestats.accepted_jobs*100) / total_jobs)
+        log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%% | Num clients: %s' \
+            %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,conn))
+        time.sleep(10)
+
 def main(args):
     global reactor
     if args.pid_file:
@@ -121,6 +135,7 @@ def main(args):
     stp.connect()
     st_listen = stratum_listener
     threading.Thread(target=control,args=[stp,st_listen]).start()
+    threading.Thread(target=watcher,args=[stp,st_listen]).start()
 
     # Setup stratum listener
     if args.stratum_port > 0:
@@ -159,6 +174,7 @@ class StratumProxy():
         self.cservice.pool_timeout = 120
         self.cservice.reset_timeout()
         self.cservice.auth = (user, passw)
+        self.sharestats = share_stats.ShareStats()
         self.cservice.f = self.f
         self.f.on_connect.addCallback(self.on_connect)
         self.f.on_disconnect.addCallback(self.on_disconnect)
