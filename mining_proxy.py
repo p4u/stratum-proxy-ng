@@ -20,6 +20,7 @@
 import argparse
 import time
 import os
+import sys
 import socket
 import threading
 
@@ -32,7 +33,7 @@ def parse_args():
     parser.add_argument('-cs', '--custom-stratum', dest='custom_stratum', type=str, help='Override URL provided in X-Stratum header')
     parser.add_argument('-cu', '--custom-user', dest='custom_user', type=str, help='Use this username for submitting shares')
     parser.add_argument('-cp', '--custom-password', dest='custom_password', type=str, help='Use this password for submitting shares')
-    parser.add_argument('--idle', dest='set_idle', action='store_true', help='Close listening stratum ports in case connection with pool is lost (recover it later if success)')
+    parser.add_argument('-xp', '--control-port', dest='control_port', type=int, default=3999, help='Control port')
     parser.add_argument('--dirty-ping', dest='dirty_ping', action='store_true', help='Use dirty ping method to check if the pool is alive (not recommended).')
     parser.add_argument('--timeout', dest='pool_timeout', type=int, default=120, help='Set pool timeout (in seconds).')
     parser.add_argument('--blocknotify', dest='blocknotify_cmd', type=str, default='', help='Execute command when the best block changes (%%s in BLOCKNOTIFY_CMD is replaced by block hash)')
@@ -78,18 +79,18 @@ import stratum.logger
 class StratumServer():
     shutdown = False
     log = None
-
-    def __init__(self,args):
+    backup = ['mine.coinshift.com',3333]
+    def __init__(self,args,st_listen):
         if args.pid_file:
             fp = file(args.pid_file, 'w')
             fp.write(str(os.getpid()))
             fp.close()
-        self.log = stratum.logger.get_logger('proxy')
-        st_listen = stratum_listener
+        self.log = stratum.logger.get_logger('proxy-%s'%args.stratum_port)
+        st_listen.log = stratum.logger.get_logger('proxy-%s'%args.stratum_port)
         stp = StratumProxy(st_listen)
         stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
         stp.connect()
-        threading.Thread(target=self.control,args=[stp,st_listen]).start()
+        threading.Thread(target=self.control,args=[stp,st_listen,args.control_port]).start()
         threading.Thread(target=self.watcher,args=[stp,st_listen]).start()
 
         # Setup stratum listener
@@ -99,7 +100,6 @@ class StratumServer():
             reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
             reactor.addSystemEventTrigger('before', 'shutdown', self.on_shutdown, stp.f)
             self.log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
-            reactor.run()
 
     def on_shutdown(self,f):
         self.shutdown = True
@@ -114,10 +114,11 @@ class StratumServer():
                 except:
                     self.log.error(str(thread.getName()) + ' could not be terminated')
 
-    def control(self,stp,stl):
+    def control(self,stp,stl,port):
         z = zmq.Context()
         s = z.socket(zmq.REQ)
-        s.bind("tcp://127.0.0.1:3999")
+        self.log.info("Control port is %s" %port)
+        s.bind("tcp://127.0.0.1:%s" %port)
         while not self.shutdown:
             s.send('READY')
             msg = s.recv()
@@ -129,8 +130,16 @@ class StratumServer():
                 if len(margs) == 3: stp.reconnect(margs[1],int(margs[2]))
                 if len(margs) == 4: stp.reconnect(margs[1],int(margs[2]),user=margs[3])
                 if len(margs) == 5: stp.reconnect(margs[1],int(margs[2]),user=margs[3],passw=margs[4])
+            if margs[0] == 'setbackup':
+                if len(margs) == 2:
+                    poolport = margs[1].split(':')
+                    if len(poolport) == 2:
+                        self.log.info("Setting new backup pool: %s:%s" %(poolport[0],poolport[1]))
+                        self.backup = poolport
 
     def watcher(self,stp,stl):
+        last_10_rejected = [0,0,0,0,0,0,0,0,0,0]
+        rejected_counter = 0
         while not self.shutdown:
             conn = stl.MiningSubscription.get_num_connections()
             last_job_secs = stp.sharestats.get_last_job_secs()
@@ -139,8 +148,22 @@ class StratumServer():
             if total_jobs == 0: total_jobs = 1
             rejected_ratio = float((stp.sharestats.rejected_jobs*100) / total_jobs)
             accepted_ratio = float((stp.sharestats.accepted_jobs*100) / total_jobs)
-            self.log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%% | Num clients: %s' \
-                %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,conn))
+
+            last_10_rejected[rejected_counter] = rejected_ratio
+            rejected_counter += 1
+            if rejected_counter >= 10: rejected_counter = 0
+            last_10_rejected_avg = 0
+            for r in last_10_rejected: last_10_rejected_avg+=r
+            last_10_rejected_avg = last_10_rejected_avg / 10
+
+            self.log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%%/%s%% | Num clients: %s' \
+                %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,last_10_rejected_avg,conn))
+
+            if self.backup and conn > 0:
+                if notify_time > 80 or rejected_ratio > 40 or last_job_secs > 360:
+                    self.log.error('Detected problem with current pool, configuring backup')
+                    stp.reconnect(self.backup[0],int(self.backup[1]))
+
             #stl.MiningSubscription.print_subs()
             time.sleep(10)
 
@@ -225,6 +248,8 @@ class StratumProxy():
         self.stl.MiningSubscription.reconnect_all()
         return f
 
+
 if __name__ == '__main__':
-    ss = StratumServer(args)
+    ss = StratumServer(args,stratum_listener)
+    reactor.run()
     

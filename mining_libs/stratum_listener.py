@@ -162,17 +162,17 @@ class StratumProxyService(GenericService):
 
         start = time.time()
         # We got something from pool, reseting client_service timeout
-        client.reset_timeout()
 
         try:
             job = job.get_job_from_id(job_id)
             difficulty = job.diff if job != None else DifficultySubscription.difficulty
             result = (yield f.rpc('mining.submit', [worker_name, job_id, tail+extranonce2, ntime, nonce]))
-
+            client.reset_timeout()
         except RemoteServiceException as exc:
             response_time = (time.time() - start) * 1000
             log.info("[%dms] Share from '%s' REJECTED: %s" % (response_time, worker_name, str(exc)))
             self.stp.sharestats.register_job(job_id,origin_worker_name,difficulty,False,self.use_sharenotify)
+            client.reset_timeout()
             raise SubmitException(*exc.args)
 
         response_time = (time.time() - start) * 1000
