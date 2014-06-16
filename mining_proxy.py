@@ -90,37 +90,46 @@ class StratumServer():
         stp = StratumProxy(st_listen)
         stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
         stp.connect()
-        threading.Thread(target=self.control,args=[stp,st_listen,args.control_port]).start()
-        threading.Thread(target=self.watcher,args=[stp,st_listen]).start()
-
+        z = zmq.Context()
+        control = threading.Thread(target=self.control,args=[stp,st_listen,args.control_port,z])
+        watcher = threading.Thread(target=self.watcher,args=[stp,st_listen])
+        control.daemon = True
+        watcher.daemon = True
+        control.start()
+        watcher.start()
         # Setup stratum listener
         if args.stratum_port > 0:
             st_listen.StratumProxyService._set_stratum_proxy(stp)
             st_listen.StratumProxyService._set_sharestats_module(args.sharestats_module)
             reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
-            reactor.addSystemEventTrigger('before', 'shutdown', self.on_shutdown, stp.f)
+            reactor.addSystemEventTrigger('before', 'shutdown', self.on_shutdown, stp.f, z)
             self.log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
 
-    def on_shutdown(self,f):
+    def on_shutdown(self,f,z):
         self.shutdown = True
         '''Clean environment properly'''
         self.log.info("Shutting down proxy...")
         f.is_reconnecting = False # Don't let stratum factory to reconnect again
+        z.destroy()
         time.sleep(1)
         for thread in threading.enumerate():
             if thread.isAlive():
                 try:
                     thread._Thread__stop()
                 except:
-                    self.log.error(str(thread.getName()) + ' could not be terminated')
+                    self.log.error('Thread could not be terminated')
 
-    def control(self,stp,stl,port):
-        z = zmq.Context()
+    def control(self,stp,stl,port,z):
         s = z.socket(zmq.REQ)
         self.log.info("Control port is %s" %port)
         s.bind("tcp://127.0.0.1:%s" %port)
         while not self.shutdown:
-            s.send('READY')
+            try:
+                s.send('READY')
+            except Exception as e:
+                if self.shutdown: break
+                else: log.error("ZMQ error: %s" %e)
+
             msg = s.recv()
             self.log.info("Control message received: %s" %msg)
             margs = msg.split()
