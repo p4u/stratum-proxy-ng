@@ -239,7 +239,7 @@ class StratumProxy():
         self.jobreg.set_extranonce(extranonce1, extranonce2_size)
 
         if self.use_set_extranonce:
-            log.info("Enable extranonce subscription method")
+            self.log.info("Enable extranonce subscription method")
             f.rpc('mining.extranonce.subscribe', [])
 
         self.log.warning("Authorizing user %s, password %s" % self.cservice.auth)
@@ -255,7 +255,7 @@ class StratumProxy():
         if not self.cservice.controlled_disconnect:
             self.log.error("Disconnected from Stratum pool at %s:%d" % self.f.main_host)
         if self.cservice.controlled_disconnect:
-            log.info("Controlled disconnect detected")
+            self.log.info("Controlled disconnect detected")
         self.stl.MiningSubscription.reconnect_all()
         return f
 
