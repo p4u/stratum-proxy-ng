@@ -151,6 +151,8 @@ class StratumServer():
     def watcher(self,stp,stl):
         last_10_rejected = [0,0,0,0,0,0,0,0,0,0]
         rejected_counter = 0
+        tries = 0
+        it_with_clients = 0
         while not self.shutdown:
             conn = stl.MiningSubscription.get_num_connections()
             last_job_secs = stp.sharestats.get_last_job_secs()
@@ -170,14 +172,20 @@ class StratumServer():
             self.log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%%/%s%% | Num clients: %s' \
                 %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,last_10_rejected_avg,conn))
 
-            if self.backup and conn > 0:
+            if self.backup and it_with_clients > 6:
                 if notify_time > 80 or rejected_ratio > 40 or last_job_secs > 360:
-                    self.log.error('Detected problem with current pool, configuring backup')
-                    stp.reconnect(self.backup[0],int(self.backup[1]))
+                    if tries > 2:
+                        tries = 0
+                        self.log.error('Detected problem with current pool, configuring backup')
+                        stp.reconnect(self.backup[0],int(self.backup[1]))
+                    else: tries += 1
 
             #stl.MiningSubscription.print_subs()
             time.sleep(10)
-
+            if conn > 0:
+                it_with_clients += 1
+                if it_with_clients > 65536: it_with_clients = 7
+            else: it_with_clients = 0
 
 class StratumProxy():
     f = None
