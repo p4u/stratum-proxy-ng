@@ -90,27 +90,29 @@ class StratumServer():
         stp = StratumProxy(st_listen)
         stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
         stp.connect()
-        z = zmq.Context()
-        control = threading.Thread(target=self.control,args=[stp,st_listen,args.control_port,z])
-        watcher = threading.Thread(target=self.watcher,args=[stp,st_listen])
-        control.daemon = True
-        watcher.daemon = True
-        control.start()
-        watcher.start()
+        self.z = zmq.Context()
+        self.control = threading.Thread(target=self.control,args=[stp,st_listen,args.control_port,self.z])
+        self.watcher = threading.Thread(target=self.watcher,args=[stp,st_listen])
+        self.control.daemon = True
+        self.watcher.daemon = True
+        self.control.start()
+        self.watcher.start()
         # Setup stratum listener
         if args.stratum_port > 0:
             st_listen.StratumProxyService._set_stratum_proxy(stp)
             st_listen.StratumProxyService._set_sharestats_module(args.sharestats_module)
             reactor_listen = reactor.listenTCP(args.stratum_port, SocketTransportFactory(debug=False, event_handler=ServiceEventHandler), interface=args.stratum_host)
-            reactor.addSystemEventTrigger('before', 'shutdown', self.on_shutdown, stp.f, z)
+            reactor.addSystemEventTrigger('before', 'shutdown', self.on_shutdown, stp.f)
             self.log.warning("PROXY IS LISTENING ON ALL IPs ON PORT %d (stratum)" % (args.stratum_port))
 
-    def on_shutdown(self,f,z):
+    def on_shutdown(self,f):
         self.shutdown = True
         '''Clean environment properly'''
         self.log.info("Shutting down proxy...")
         f.is_reconnecting = False # Don't let stratum factory to reconnect again
-        z.destroy()
+        self.z.destroy()
+        self.control.join(5.0)
+        self.watcher.join(5.0)
         time.sleep(1)
         for thread in threading.enumerate():
             if thread.isAlive():
