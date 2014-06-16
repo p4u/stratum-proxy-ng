@@ -153,6 +153,7 @@ class StratumServer():
         rejected_counter = 0
         tries = 0
         it_with_clients = 0
+        last_rejected_jobs = 0
         while not self.shutdown:
             conn = stl.MiningSubscription.get_num_connections()
             last_job_secs = stp.sharestats.get_last_job_secs()
@@ -161,19 +162,23 @@ class StratumServer():
             if total_jobs == 0: total_jobs = 1
             rejected_ratio = float((stp.sharestats.rejected_jobs*100) / total_jobs)
             accepted_ratio = float((stp.sharestats.accepted_jobs*100) / total_jobs)
-
-            last_10_rejected[rejected_counter] = rejected_ratio
+            if stp.sharestats.rejected_jobs < 1:
+                last_10_rejected[rejected_counter] = 0
+                last_rejected_jobs = 0
+            else:
+                last_10_rejected[rejected_counter] = stp.sharestats.rejected_jobs - last_rejected_jobs
+                last_rejected_jobs = stp.sharestats.rejected_jobs
+            self.log.info("%s" %last_10_rejected)
             rejected_counter += 1
             if rejected_counter >= 10: rejected_counter = 0
             last_10_rejected_avg = 0
             for r in last_10_rejected: last_10_rejected_avg+=r
-            last_10_rejected_avg = last_10_rejected_avg / 10
 
             self.log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%%/%s%% | Num clients: %s' \
                 %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,last_10_rejected_avg,conn))
 
             if self.backup and it_with_clients > 6:
-                if notify_time > 80 or rejected_ratio > 40 or last_job_secs > 360:
+                if notify_time > 80 or  last_10_rejected_avg > 40 or last_job_secs > 360:
                     if tries > 2:
                         tries = 0
                         self.log.error('Detected problem with current pool, configuring backup')
