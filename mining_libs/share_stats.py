@@ -41,6 +41,13 @@ class ShareStats(object):
 
     def _execute_snippet(self, job_id, worker_name,dif, accepted):
         log.info("Current active threads: %s" %threading.active_count())
+        if threading.active_count() > 10:
+            try:
+                log.error("Deadlock detected, trying to release it")
+                self.lock.release()
+            except Exception as e:
+                log.error("%s" %e)
         init_time = time.time()
-        threading.Thread(target=self.on_share,args=[self,job_id,worker_name,init_time,dif,accepted]).start()
-
+        t = threading.Thread(target=self.on_share,args=[self,job_id,worker_name,init_time,dif,accepted])
+        t.daemon = True
+        t.start()
