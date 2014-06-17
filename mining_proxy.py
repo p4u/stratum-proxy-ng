@@ -168,7 +168,6 @@ class StratumServer():
             else:
                 last_10_rejected[rejected_counter] = stp.sharestats.rejected_jobs - last_rejected_jobs
                 last_rejected_jobs = stp.sharestats.rejected_jobs
-            self.log.info("%s" %last_10_rejected)
             rejected_counter += 1
             if rejected_counter >= 10: rejected_counter = 0
             last_10_rejected_avg = 0
