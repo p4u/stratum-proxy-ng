@@ -124,7 +124,14 @@ class StratumServer():
     def control(self,stp,stl,port,z):
         s = z.socket(zmq.REQ)
         self.log.info("Control port is %s" %port)
-        s.bind("tcp://127.0.0.1:%s" %port)
+        listening = False
+        while not listening:
+            try:
+                s.bind("tcp://127.0.0.1:%s" %port)
+                listening = True
+            except:
+                self.log.error("Cannot listen to control port %s. Retrying in 10 seconds" %port)
+                time.sleep(10)
         while not self.shutdown:
             try:
                 s.send('READY')
