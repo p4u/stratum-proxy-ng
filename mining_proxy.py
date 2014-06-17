@@ -174,8 +174,8 @@ class StratumServer():
             last_10_rejected_avg = 0
             for r in last_10_rejected: last_10_rejected_avg+=r
 
-            self.log.info('Last job was %ss ago | Last notify was %ss ago | Accepted:%s%% Rejected:%s%%/%s%% | Num clients: %s' \
-                %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,last_10_rejected_avg,conn))
+            self.log.info('Last job %ss ago | Last notify %ss ago | Accepted:%s%% Rejected:%s%%/%s%% | Num clients: %s | Pool: %s' \
+                %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,last_10_rejected_avg,conn,stp.host))
 
             if self.backup and it_with_clients > 6:
                 if notify_time > 80 or  last_10_rejected_avg > 40 or last_job_secs > 360:
