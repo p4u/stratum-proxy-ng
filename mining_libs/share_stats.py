@@ -5,13 +5,14 @@ import subprocess
 import threading
 log = stratum.logger.get_logger('proxy')
 
-class ShareStats(object):	
+class ShareStats(object):
+    shares = {}
     def __init__(self):
         self.accepted_jobs = 0
         self.rejected_jobs = 0
         self.lock = threading.Lock()
         self.last_job_time = datetime.datetime.now()
-
+        self.shares = {}
     def get_last_job_secs(self):
         return  int((datetime.datetime.now() - self.last_job_time).total_seconds())
 
@@ -37,7 +38,17 @@ class ShareStats(object):
         self.last_job_time = datetime.datetime.now()
         if accepted: self.accepted_jobs += 1
         else: self.rejected_jobs += 1
-        self._execute_snippet(job_id,worker_name,dif,accepted)
+
+        if not (worker_name in self.shares):
+            self.shares[worker_name] = [0,0]
+        if accepted:
+            if self.shares[worker_name][0] > 10**16: self.shares[worker_name][0] = 0
+            self.shares[worker_name][0] += dif
+        else:
+            if self.shares[worker_name][1] > 10**16: self.shares[worker_name][1] = 0
+            self.shares[worker_name][1] += dif
+
+        if sharenotify: self._execute_snippet(job_id,worker_name,dif,accepted)
 
     def _execute_snippet(self, job_id, worker_name,dif, accepted):
         log.info("Current active threads: %s" %threading.active_count())

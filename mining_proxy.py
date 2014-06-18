@@ -23,6 +23,8 @@ import os
 import sys
 import socket
 import threading
+import json
+import datetime
 
 def parse_args():
     parser = argparse.ArgumentParser(description='This proxy allows you to run getwork-based miners against Stratum mining pool.')
@@ -79,7 +81,7 @@ import stratum.logger
 class StratumServer():
     shutdown = False
     log = None
-    backup = ['mine.coinshift.com',3333]
+    backup = None
     def __init__(self,args,st_listen):
         if args.pid_file:
             fp = file(args.pid_file, 'w')
@@ -122,7 +124,7 @@ class StratumServer():
                     self.log.error('Thread could not be terminated')
 
     def control(self,stp,stl,port,z):
-        s = z.socket(zmq.REQ)
+        s = z.socket(zmq.REP)
         self.log.info("Control port is %s" %port)
         listening = False
         while not listening:
@@ -132,28 +134,63 @@ class StratumServer():
             except:
                 self.log.error("Cannot listen to control port %s. Retrying in 10 seconds" %port)
                 time.sleep(10)
+
         while not self.shutdown:
-            try:
-                s.send('READY')
-            except Exception as e:
-                if self.shutdown: break
-                else: log.error("ZMQ error: %s" %e)
 
             msg = s.recv()
             self.log.info("Control message received: %s" %msg)
-            margs = msg.split()
-            if margs[0] == 'setpool':
-                # host, port, user, passw
-                #stl.MiningSubscription.reconnect_all()
-                if len(margs) == 3: stp.reconnect(margs[1],int(margs[2]))
-                if len(margs) == 4: stp.reconnect(margs[1],int(margs[2]),user=margs[3])
-                if len(margs) == 5: stp.reconnect(margs[1],int(margs[2]),user=margs[3],passw=margs[4])
-            if margs[0] == 'setbackup':
-                if len(margs) == 2:
-                    poolport = margs[1].split(':')
-                    if len(poolport) == 2:
-                        self.log.info("Setting new backup pool: %s:%s" %(poolport[0],poolport[1]))
-                        self.backup = poolport
+            response = {}
+            try:
+                jmsg = json.loads(msg)
+                query = jmsg['query']
+            except Exception as e:
+                self.log.error("Cannot decode message: %s (%s)" %(msg,e))
+                jmsg = "{}"
+                query = None
+                response['exception'] = e.__str__()
+
+            response['error'] = True
+            if query == "ping":
+                response['error'] = False
+
+            if query == 'setpool':
+                host = jmsg['host'] if 'host' in jmsg else None
+                port = jmsg['port'] if 'port' in jmsg else None
+                user = jmsg['user'] if 'user' in jmsg else None
+                passw = jmsg['passw'] if 'passw' in jmsg else None
+                if host and port and user and passw:
+                    stp.reconnect(host,int(port),user=user,passw=passw)
+                    response['error'] = False
+                elif host and port and user:
+                    stp.reconnect(host,int(port),user=user)
+                    response['error'] = False
+                elif host and port:
+                    stp.reconnect(host,int(port))
+                    response['error'] = False
+
+            if query == 'setbackup':
+                host = jmsg['host'] if 'host' in jmsg else None
+                port = jmsg['port'] if 'port' in jmsg else None
+                if host and port:
+                    self.log.info("Setting new backup pool: %s:%s" %(host,port))
+                    self.backup = [host,int(port)]
+                    response['error'] = False
+
+            if query == "getshares":
+                shares = {}
+                for sh in stp.sharestats.shares.keys():
+                    acc, rej = stp.sharestats.shares[sh]
+                    if acc+rej > 0:
+                        shares[sh] = { 'accepted':acc, 'rejected':rej }
+                        stp.sharestats.shares[sh][0] -= acc
+                        stp.sharestats.shares[sh][1] -= rej
+                if len(shares) > 0:
+                    with open('shares.log','a') as l:
+                        l.write("[%s] %s\n" %(datetime.datetime.now(),shares))
+                response['shares'] = shares
+                response['error'] = False
+
+            s.send(json.dumps(response, ensure_ascii=True))
 
     def watcher(self,stp,stl):
         last_10_rejected = [0,0,0,0,0,0,0,0,0,0]
@@ -202,6 +239,7 @@ class StratumProxy():
     f = None
     jobreg = None
     cservice = None
+    sharestats = None
     use_set_extranonce = False
     set_extranonce_pools = ['nicehash.com']
 
