@@ -87,8 +87,8 @@ class StratumServer():
             fp = file(args.pid_file, 'w')
             fp.write(str(os.getpid()))
             fp.close()
-        self.log = stratum.logger.get_logger('proxy-%s'%args.stratum_port)
-        st_listen.log = stratum.logger.get_logger('proxy-%s'%args.stratum_port)
+        self.log = stratum.logger.get_logger('proxy%s'%args.stratum_port)
+        st_listen.log = stratum.logger.get_logger('proxy%s'%args.stratum_port)
         stp = StratumProxy(st_listen)
         stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
         stp.connect()
@@ -127,6 +127,7 @@ class StratumServer():
         s = z.socket(zmq.REP)
         self.log.info("Control port is %s" %port)
         listening = False
+        rm_shares = {}
         while not listening:
             try:
                 s.bind("tcp://%s:%s" %(listen,port))
@@ -136,7 +137,6 @@ class StratumServer():
                 time.sleep(10)
 
         while not self.shutdown:
-
             msg = s.recv()
             self.log.info("Control message received: %s" %msg)
             response = {}
@@ -182,9 +182,22 @@ class StratumServer():
                     acc, rej = stp.sharestats.shares[sh]
                     if acc+rej > 0:
                         shares[sh] = { 'accepted':acc, 'rejected':rej }
-                        stp.sharestats.shares[sh][0] -= acc
-                        stp.sharestats.shares[sh][1] -= rej
+                self.log.debug('Shares sent: %s' %shares)
                 response['shares'] = shares
+                response['error'] = False
+                for sh in shares.keys():
+                    if sh in rm_shares:
+                        rm_shares[sh]['accepted'] += shares[sh]['accepted']
+                        rm_shares[sh]['rejected'] += shares[sh]['rejected']
+                    else:
+                        rm_shares[sh] = shares[sh]
+
+            if query == 'cleanshares':
+                self.log.debug('Shares to remove: %s' %rm_shares)
+                for sh in rm_shares.keys():
+                    stp.sharestats.shares[sh][0] -= rm_shares[sh]['accepted']
+                    stp.sharestats.shares[sh][1] -= rm_shares[sh]['rejected']
+                rm_shares = {}
                 response['error'] = False
 
             s.send(json.dumps(response, ensure_ascii=True))
