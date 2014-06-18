@@ -36,6 +36,7 @@ def parse_args():
     parser.add_argument('-cu', '--custom-user', dest='custom_user', type=str, help='Use this username for submitting shares')
     parser.add_argument('-cp', '--custom-password', dest='custom_password', type=str, help='Use this password for submitting shares')
     parser.add_argument('-xp', '--control-port', dest='control_port', type=int, default=3999, help='Control port')
+    parser.add_argument('--control-listen', dest='control_listen', type=str, default="127.0.0.1", help='Control port bind address')
     parser.add_argument('--dirty-ping', dest='dirty_ping', action='store_true', help='Use dirty ping method to check if the pool is alive (not recommended).')
     parser.add_argument('--timeout', dest='pool_timeout', type=int, default=120, help='Set pool timeout (in seconds).')
     parser.add_argument('--blocknotify', dest='blocknotify_cmd', type=str, default='', help='Execute command when the best block changes (%%s in BLOCKNOTIFY_CMD is replaced by block hash)')
@@ -45,7 +46,6 @@ def parse_args():
     parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Make output more quiet')
     parser.add_argument('-i', '--pid-file', dest='pid_file', type=str, help='Store process pid to the file')
     parser.add_argument('-l', '--log-file', dest='log_file', type=str, help='Log to specified file')
-    parser.add_argument('-st', '--scrypt-target', dest='scrypt_target', action='store_true', help='Calculate targets for scrypt algorithm')
     return parser.parse_args()
 
 from stratum import settings
@@ -93,7 +93,7 @@ class StratumServer():
         stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
         stp.connect()
         self.z = zmq.Context()
-        self.control = threading.Thread(target=self.control,args=[stp,st_listen,args.control_port,self.z])
+        self.control = threading.Thread(target=self.control,args=[stp,st_listen,args.control_listen,args.control_port,self.z])
         self.watcher = threading.Thread(target=self.watcher,args=[stp,st_listen])
         self.control.daemon = True
         self.watcher.daemon = True
@@ -123,13 +123,13 @@ class StratumServer():
                 except:
                     self.log.error('Thread could not be terminated')
 
-    def control(self,stp,stl,port,z):
+    def control(self,stp,stl,listen,port,z):
         s = z.socket(zmq.REP)
         self.log.info("Control port is %s" %port)
         listening = False
         while not listening:
             try:
-                s.bind("tcp://127.0.0.1:%s" %port)
+                s.bind("tcp://%s:%s" %(listen,port))
                 listening = True
             except:
                 self.log.error("Cannot listen to control port %s. Retrying in 10 seconds" %port)
@@ -184,9 +184,6 @@ class StratumServer():
                         shares[sh] = { 'accepted':acc, 'rejected':rej }
                         stp.sharestats.shares[sh][0] -= acc
                         stp.sharestats.shares[sh][1] -= rej
-                if len(shares) > 0:
-                    with open('shares.log','a') as l:
-                        l.write("[%s] %s\n" %(datetime.datetime.now(),shares))
                 response['shares'] = shares
                 response['error'] = False
 
