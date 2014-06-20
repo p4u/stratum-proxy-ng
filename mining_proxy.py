@@ -279,16 +279,10 @@ class StratumProxy():
         if not user: user = cuser
         if not passw: passw = cpassw
         self.cservice.auth = (user, passw)
-        if not self.f.client or (not self.f.client.connected):
-            self.log.info("Trying new connection with pool")
-            self.f.new_host = (self.host,self.port)
-            self.f.reconnect()
-            self.f.on_connect.addCallback(self.on_connect)
-            self.f.on_disconnect.addCallback(self.on_disconnect)
-            self.f.on_connect
-        else:
-            self.log.info("Trying reconnection with pool")
-            self.f.reconnect(host, port, None)
+        self.log.info("Trying reconnection with pool")
+        self.f.on_connect.addCallback(self.on_connect)
+        self.f.on_disconnect.addCallback(self.on_disconnect)
+        self.f.reconnect(host,port,None)
 
     def connect(self):
         yield self.f.on_connect
@@ -325,10 +319,9 @@ class StratumProxy():
                 self.log.error("Two or more connection lost, switching to backup pool: %s" %self.backup)
                 self.reconnect(host=self.backup[0],port=self.backup[1])
                 self.using_backup = True
-        if self.cservice.controlled_disconnect:
+        else:
             self.log.info("Controlled disconnect detected")
             self.cservice.controlled_disconnect = False
-            self.reconnect()
         self.stl.MiningSubscription.reconnect_all()
         self.disconnect_counter += 1
         return f

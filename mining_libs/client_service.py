@@ -121,7 +121,7 @@ class ClientMiningService(GenericEventHandler):
             if port and port > 2: new[1] = port
             log.info("Reconnecting to %s:%d" % tuple(new))
             self.set_controlled_disconnect(True)
-            self.job_registry.f.reconnect(new[0], new[1], wait)
+            self.f.reconnect(new[0], new[1], wait)
 
         elif method == 'mining.set_extranonce':
             '''Method to set new extranonce'''
@@ -133,8 +133,8 @@ class ClientMiningService(GenericEventHandler):
                 log.error("Wrong extranonce information got from pool, ignoring")
                 return False
             self.job_registry.set_extranonce(extranonce1, int(extranonce2_size))
+            log.info('Sending reconnect order to workers')
             stratum_listener.MiningSubscription.reconnect_all()
-
             return True
         
         elif method == 'client.add_peers':
