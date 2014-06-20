@@ -119,28 +119,27 @@ class StratumProxyService(GenericService):
     def subscribe(self, *args):    
         f = self._get_stratum_proxy().f
         job = self._get_stratum_proxy().jobreg
-        
+
         if f.client == None or not f.client.connected:
             yield f.on_connect
-            
-        if f.client == None or not f.client.connected:
+
+        conn = self.connection_ref()
+
+        if f.client == None or not f.client.connected or not conn:
             raise UpstreamServiceException("Upstream not connected")
-         
+
         if job.extranonce1 == None:
             # This should never happen, because _f.on_connect is fired *after*
             # connection receive mining.subscribe response
             raise UpstreamServiceException("Not subscribed on upstream yet")
-        
+
         (tail, extranonce2_size) = job._get_unused_tail()
-        
         session = self.connection_ref().get_session()
         session['tail'] = tail
-                
         # Remove extranonce from registry when client disconnect
-        self.connection_ref().on_disconnect.addCallback(job._drop_tail, tail)
-
-        subs1 = Pubsub.subscribe(self.connection_ref(), DifficultySubscription())[0]
-        subs2 = Pubsub.subscribe(self.connection_ref(), MiningSubscription())[0]            
+        conn.on_disconnect.addCallback(job._drop_tail, tail)
+        subs1 = Pubsub.subscribe(conn, DifficultySubscription())[0]
+        subs2 = Pubsub.subscribe(conn, MiningSubscription())[0]            
         log.info("Sending subscription to worker: %s/%s" %(job.extranonce1+tail, extranonce2_size))
         defer.returnValue(((subs1, subs2),) + (job.extranonce1+tail, extranonce2_size))
     
@@ -149,7 +148,7 @@ class StratumProxyService(GenericService):
         f = self._get_stratum_proxy().f
         job = self._get_stratum_proxy().jobreg
         client = self._get_stratum_proxy().cservice
-        
+
         if f.client == None or not f.client.connected:
             raise SubmitException("Upstream not connected")
 

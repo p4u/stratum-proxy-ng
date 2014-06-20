@@ -20,7 +20,6 @@ class ClientMiningService(GenericEventHandler):
     auth = False
     is_backup_active = False
     use_dirty_ping = False
-    pool_timeout = 120
     authorized = None
     last_notify_time = None
 
@@ -38,11 +37,6 @@ class ClientMiningService(GenericEventHandler):
     @classmethod
     def reset_timeout(cls):
         cls.last_notify_time = datetime.datetime.now()
-        if cls.timeout != None:
-            if not cls.timeout.called:
-                cls.timeout.cancel()
-            cls.timeout = None
-        cls.timeout = reactor.callLater(cls.pool_timeout, cls.on_timeout)
 
     @classmethod
     def on_ping_reply(cls,result):
@@ -51,33 +45,10 @@ class ClientMiningService(GenericEventHandler):
 
     @classmethod
     def send_ping(cls):
-        if cls.f.client == None or not cls.f.client.connected:
-            cls.on_timeout()
-        else:
-            log.info("Sending ping to pool")
-            d = cls.f.rpc('mining.ping', [])
-            d.addCallback(cls.on_ping_reply)
-            d.addErrback(cls.on_ping_reply)
-            cls.timeout = reactor.callLater(5, cls.on_timeout)
-
-    @classmethod
-    def on_timeout(cls):
-        '''
-            Try to reconnect to the pool after two minutes of no activity on the connection.
-            It will also drop all Stratum connections to sub-miners
-            to indicate connection issues.
-        '''
-        if (not cls.use_dirty_ping) or cls.ping_sent:
-            cls.ping_sent = False
-            log.error("Connection to upstream pool timed out")
-            cls.reset_timeout()
-            cls.job_registry.f.reconnect()
-            cls.set_controlled_disconnect(False)
-            pool = list(cls.job_registry.f.main_host[::])
-            cls.job_registry.f.reconnect(pool[0], pool[1], None)
-        else:
-            cls.ping_sent = True
-            cls.send_ping()
+        log.info("Sending ping to pool")
+        d = cls.f.rpc('mining.ping', [])
+        d.addCallback(cls.on_ping_reply)
+        d.addErrback(cls.on_ping_reply)
 
     @classmethod
     def _on_fail_authorized(self,resp,worker_name):

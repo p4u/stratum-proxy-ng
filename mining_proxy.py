@@ -90,7 +90,7 @@ class StratumServer():
         self.log = stratum.logger.get_logger('proxy%s'%args.stratum_port)
         st_listen.log = stratum.logger.get_logger('proxy%s'%args.stratum_port)
         stp = StratumProxy(st_listen)
-        stp.set_pool(args.host,args.port,args.custom_user,args.custom_password)
+        stp.set_pool(args.host,args.port,args.custom_user,args.custom_password,timeout=args.pool_timeout)
         stp.connect()
         self.z = zmq.Context()
         self.control = threading.Thread(target=self.control,args=[stp,st_listen,args.control_listen,args.control_port,self.z])
@@ -159,13 +159,13 @@ class StratumServer():
                 user = jmsg['user'] if 'user' in jmsg else None
                 passw = jmsg['passw'] if 'passw' in jmsg else None
                 if host and port and user and passw:
-                    stp.reconnect(host,int(port),user=user,passw=passw)
+                    stp.reconnect(host=host,port=int(port),user=user,passw=passw)
                     response['error'] = False
                 elif host and port and user:
-                    stp.reconnect(host,int(port),user=user)
+                    stp.reconnect(host=host,port=int(port),user=user)
                     response['error'] = False
                 elif host and port:
-                    stp.reconnect(host,int(port))
+                    stp.reconnect(host=host,port=int(port))
                     response['error'] = False
 
             if query == 'setbackup':
@@ -174,6 +174,7 @@ class StratumServer():
                 if host and port:
                     self.log.info("Setting new backup pool: %s:%s" %(host,port))
                     self.backup = [host,int(port)]
+                    stp.backup = [host,int(port)]
                     response['error'] = False
 
             if query == "getshares":
@@ -203,11 +204,7 @@ class StratumServer():
             s.send(json.dumps(response, ensure_ascii=True))
 
     def watcher(self,stp,stl):
-        last_10_rejected = [0,0,0,0,0,0,0,0,0,0]
-        rejected_counter = 0
-        tries = 0
-        it_with_clients = 0
-        last_rejected_jobs = 0
+        it_with_clients = 0 # counter for number of watcher iterations with clients connected
         while not self.shutdown:
             conn = stl.MiningSubscription.get_num_connections()
             last_job_secs = stp.sharestats.get_last_job_secs()
@@ -216,29 +213,18 @@ class StratumServer():
             if total_jobs == 0: total_jobs = 1
             rejected_ratio = float((stp.sharestats.rejected_jobs*100) / total_jobs)
             accepted_ratio = float((stp.sharestats.accepted_jobs*100) / total_jobs)
-            if stp.sharestats.rejected_jobs < 1:
-                last_10_rejected[rejected_counter] = 0
-                last_rejected_jobs = 0
-            else:
-                last_10_rejected[rejected_counter] = stp.sharestats.rejected_jobs - last_rejected_jobs
-                last_rejected_jobs = stp.sharestats.rejected_jobs
-            rejected_counter += 1
-            if rejected_counter >= 10: rejected_counter = 0
-            last_10_rejected_avg = 0
-            for r in last_10_rejected: last_10_rejected_avg+=r
+            self.log.info('Last Job/Notify: %ss/%ss | Accepted:%s%% Rejected:%s%% | Clients: %s | Pool: %s (diff:%s backup:%s)' \
+                %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,conn,stp.host,stp.jobreg.difficulty,stp.using_backup))
 
-            self.log.info('Last job %ss ago | Last notify %ss ago | Accepted:%s%% Rejected:%s%%/%s%% | Num clients: %s | Pool: %s' \
-                %(last_job_secs,notify_time,accepted_ratio,rejected_ratio,last_10_rejected_avg,conn,stp.host))
+            if notify_time > stp.pool_timeout or (it_with_clients > 6 and last_job_secs > 360):
+                if self.backup:
+                    self.log.error('Detected problem with current pool, configuring backup')
+                    stp.reconnect(host=self.backup[0],port=int(self.backup[1]))
+                    stp.using_backup = True
+                else:
+                    self.log.error('Detected problem with current pool, reconnecting')
+                    stp.reconnect()
 
-            if self.backup and it_with_clients > 6:
-                if notify_time > 80 or  last_10_rejected_avg > 40 or last_job_secs > 360:
-                    if tries > 2:
-                        tries = 0
-                        self.log.error('Detected problem with current pool, configuring backup')
-                        stp.reconnect(self.backup[0],int(self.backup[1]))
-                    else: tries += 1
-
-            #stl.MiningSubscription.print_subs()
             time.sleep(10)
             if conn > 0:
                 it_with_clients += 1
@@ -252,6 +238,10 @@ class StratumProxy():
     sharestats = None
     use_set_extranonce = False
     set_extranonce_pools = ['nicehash.com']
+    disconnect_counter = 0
+    pool_timeout = 0
+    backup = []
+    using_backup = False
 
     def __init__(self,stl):
         self.log = stratum.logger.get_logger('proxy')
@@ -263,17 +253,17 @@ class StratumProxy():
             if self.host.find(pool) > 0:
                 self.use_set_extranonce = True
 
-    def set_pool(self,host,port,user,passw):
+    def set_pool(self,host,port,user,passw,timeout=120):
         self.log.warning("Trying to connect to Stratum pool at %s:%d" % (host, port))
         self.host = host
         self.port = int(port)
         self._detect_set_extranonce()
         self.cservice = client_service.ClientMiningService
-        self.f = SocketTransportClientFactory(host, port,debug=True, event_handler=self.cservice)
+        self.f = SocketTransportClientFactory(host, port, debug=True, event_handler=self.cservice)
         self.jobreg = jobs.JobRegistry(self.f, scrypt_target=True)
         self.cservice.job_registry = self.jobreg
         self.cservice.use_dirty_ping = False
-        self.cservice.pool_timeout = 120
+        self.pool_timeout = timeout
         self.cservice.reset_timeout()
         self.cservice.auth = (user, passw)
         self.sharestats = share_stats.ShareStats()
@@ -281,18 +271,27 @@ class StratumProxy():
         self.f.on_connect.addCallback(self.on_connect)
         self.f.on_disconnect.addCallback(self.on_disconnect)
     
-    def reconnect(self,host,port,user=None,passw=None):
-        self.host = host
-        self.port = int(port)
+    def reconnect(self,host=None,port=None,user=None,passw=None):
+        if host: self.host = host
+        if port: self.port = int(port)
         self._detect_set_extranonce()
         cuser,cpassw = self.cservice.auth
         if not user: user = cuser
         if not passw: passw = cpassw
         self.cservice.auth = (user, passw)
-        self.f.reconnect(host, port, None)
+        if not self.f.client or (not self.f.client.connected):
+            self.log.info("Trying new connection with pool")
+            self.f.new_host = (self.host,self.port)
+            self.f.reconnect()
+            self.f.on_connect.addCallback(self.on_connect)
+            self.f.on_disconnect.addCallback(self.on_disconnect)
+            self.f.on_connect
+        else:
+            self.log.info("Trying reconnection with pool")
+            self.f.reconnect(host, port, None)
 
     def connect(self):
-        self.f.on_connect
+        yield self.f.on_connect
 
     @defer.inlineCallbacks
     def on_connect(self,f):
@@ -314,6 +313,7 @@ class StratumProxy():
 
         # Set controlled disconnect to False
         self.cservice.controlled_disconnect = False
+        self.disconnect_counter = 0
         defer.returnValue(f)
 
     def on_disconnect(self,f):
@@ -321,9 +321,16 @@ class StratumProxy():
         f.on_disconnect.addCallback(self.on_disconnect)
         if not self.cservice.controlled_disconnect:
             self.log.error("Disconnected from Stratum pool at %s:%d" % self.f.main_host)
+            if self.backup and self.disconnect_counter > 1:
+                self.log.error("Two or more connection lost, switching to backup pool: %s" %self.backup)
+                self.reconnect(host=self.backup[0],port=self.backup[1])
+                self.using_backup = True
         if self.cservice.controlled_disconnect:
             self.log.info("Controlled disconnect detected")
+            self.cservice.controlled_disconnect = False
+            self.reconnect()
         self.stl.MiningSubscription.reconnect_all()
+        self.disconnect_counter += 1
         return f
 
 
