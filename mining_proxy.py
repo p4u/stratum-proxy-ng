@@ -283,8 +283,10 @@ class StratumProxy():
         if not user: user = cuser
         if not passw: passw = cpassw
         self.cservice.auth = (user, passw)
+        self.cservice.controlled_disconnect = True
         self.log.info("Trying reconnection with pool")
         if not self.f.client:
+            self.log.info("Client was not connected before!")
             self.f.on_connect.addCallback(self.on_connect)
             self.f.on_disconnect.addCallback(self.on_disconnect)
         self.f.reconnect(host,port,None)
@@ -319,7 +321,7 @@ class StratumProxy():
         '''Callback when proxy get disconnected from the pool'''
         f.on_disconnect.addCallback(self.on_disconnect)
         if not self.cservice.controlled_disconnect:
-            self.log.error("Disconnected from Stratum pool at %s:%d" % self.f.main_host)
+            self.log.error("Uncontroled disconnect detected for pool %s:%d" % self.f.main_host)
             if self.backup and self.disconnect_counter > 1:
                 self.log.error("Two or more connection lost, switching to backup pool: %s" %self.backup)
                 f.new_host = (self.backup[0],self.backup[1])
