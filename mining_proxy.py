@@ -224,6 +224,9 @@ class StratumServer():
                 else:
                     self.log.error('Detected problem with current pool, reconnecting')
                     stp.reconnect()
+                notify_time = 0
+                last_job_secs = 0
+                it_with_clients = 0
 
             time.sleep(10)
             if conn > 0:
