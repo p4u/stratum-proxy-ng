@@ -169,13 +169,13 @@ class StratumProxyService(GenericService):
             client.reset_timeout()
         except RemoteServiceException as exc:
             response_time = (time.time() - start) * 1000
-            log.info("[%dms] Share from %s (%s) rejected, diff %d: %s" % (response_time, origin_worker_name, worker_name, difficulty, str(exc)))
+            log.info("[%dms] Share from %s (%s) REJECTED, diff %d: %s" % (response_time, origin_worker_name, worker_name, difficulty, str(exc)))
             self.stp.sharestats.register_job(job_id,origin_worker_name,difficulty,False,self.use_sharenotify)
             client.reset_timeout()
             raise SubmitException(*exc.args)
 
         response_time = (time.time() - start) * 1000
-        log.info("[%dms] Share from %s (%s) accepted, diff %d" % (response_time, origin_worker_name, worker_name, difficulty))
+        log.info("[%dms] Share from %s (%s) ACCEPTED, diff %d" % (response_time, origin_worker_name, worker_name, difficulty))
         self.stp.sharestats.register_job(job_id,origin_worker_name,difficulty,True,self.use_sharenotify)
         defer.returnValue(result)
 
