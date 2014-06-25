@@ -246,6 +246,7 @@ class StratumProxy():
     backup = []
     using_backup = False
     origin_pool = []
+    connecting = False
 
     def __init__(self,stl):
         self.log = stratum.logger.get_logger('proxy')
@@ -289,10 +290,15 @@ class StratumProxy():
             self.log.info("Client was not connected before!")
             self.f.on_connect.addCallback(self.on_connect)
             self.f.on_disconnect.addCallback(self.on_disconnect)
-        self.f.reconnect(host,port,None)
+            self.f.new_host = (self.host, self.port)
+            self.f.connect()
+        else:
+            self.f.reconnect(host,port,None)
 
     def connect(self):
+        self.connecting = True
         yield self.f.on_connect
+        self.connecting = False
 
     @defer.inlineCallbacks
     def on_connect(self,f):
