@@ -1,74 +1,55 @@
-stratum-mining-proxy
+stratum-proxy-ng
 ====================
 
-Application providing bridge between old HTTP/getwork protocol and Stratum mining protocol
-as described here: http://mining.bitcoin.cz/stratum-mining.
+Application providing a proxy between a Stratum mining server and a Stratum mining client.
+Stratum specification: http://mining.bitcoin.cz/stratum-mining
 
-Installation on Windows
------------------------
+Current version: alpha 0.1
+License: GNU Affero General Public License version 3 (see COPYING)
 
-1. Download official Windows binaries (EXE) from https://mining.bitcoin.cz/media/download/mining_proxy.exe
-2. Open downloaded file. It will open console window. Using default settings, proxy connects to Slush's pool interface
-3. If you want to connect to another pool or change other proxy settings, type "mining_proxy.exe --help" in console window.
+New features
+====================
 
-Installation on Linux
----------------------
-
-1. Download TGZ file from https://github.com/slush0/stratum-mining-proxy/tarball/master
-2. Unpack it by typing "tar xf slush0-stratum-mining_proxy*.tar.gz"
-3. Most likely you already have Python respectively OpenSSL installed on your system. Otherwise install it by "sudo apt-get install python-dev libssl-dev"
-(on Ubuntu and Debian).
-3. Type "sudo python setup.py install" in the unpacked directory.
-4. You can start the proxy by typing "./mining_proxy.py" in the terminal window. Using default settings,
-proxy connects to Slush's pool interface.
-5. If you want to connect to another pool or change other proxy settings, type "mining_proxy.py --help".
-
-Installation on Mac
--------------------
-1. Download TGZ file from https://github.com/slush0/stratum-mining-proxy/tarball/master
-2. Unpack it by typing "tar xf slush0-stratum-mining-proxy*.tar.gz"
-3. On Mac OS X you already have Python installed on your system, but you lack the llvm-gcc-4.2 binary required to run the setup.py file, so:
-3. a) If you don't want to install Xcode, get gcc here: https://github.com/kennethreitz/osx-gcc-installer
-3. b) OR download Xcode (free) from the App Store, Open it up (it's in your applications folder) and go to preferences, to the downloads section and download/install the 'command line tools'. This will install llvm-gc-4.2.
-4. Type "sudo python setup.py install" in the unpacked directory from step 2.
-5. You can start the proxy by typing "./mining_proxy.py" in the terminal window. Using default settings, proxy connects to Slush's pool interface.
-6. If you want to connect to another pool or change other proxy settings, type "mining_proxy.py --help".
-
-N.B. Once Apple releases Xcode 4.7 they will remove the optional install of gcc (they want you to use clang). When that happens you can either choose not to upgrade, or return to the aforementioned https://github.com/kennethreitz/osx-gcc-installer and download the specific gcc binary for your version of Mac OS.
+0. Remove all GetWork related code. 
+1. Heavy redesign of the main class code (simple and easier to understand now).
+2. Define a backup pool which is used if there is some problem with the current pool.
+3. Control thread: new interface to control the proxy via TCP socket and JSON (i.e origin pool can be changed without restarting proxy).
+4. Watcher thread: informs about current details of the proxy every 10 seconds
+5. Share notify snippets support added (allows execute custom python code when a share is found) 
+6. Support for new set extranonce stratum method (partial)
+7. Some other small features
 
 Installation on Linux using Git
 -------------------------------
 This is advanced option for experienced users, but give you the easiest way for updating the proxy.
 
-1. git clone git://github.com/slush0/stratum-mining-proxy.git
+1. git clone git://github.com/p4u/stratum-proxy-ng.git
 2. cd stratum-mining-proxy
-3. sudo apt-get install python-dev # Development package of Python are necessary
+3. sudo apt-get install python-dev python-zmq
 4. sudo python distribute_setup.py # This will upgrade setuptools package
 5. sudo python setup.py develop # This will install required dependencies (namely Twisted and Stratum libraries),
 but don't install the package into the system.
-6. You can start the proxy by typing "./mining_proxy.py" in the terminal window. Using default settings,
-proxy connects to Slush's pool interface.
-7. If you want to connect to another pool or change other proxy settings, type "./mining_proxy.py --help".
+6. You can start the proxy by typing "python2.7 stproxy-ng.py" in the terminal window. 
+```
+python2.7 stproxy-ng.py -o originpool.com -p 3333 -sp 3334 -sh 0.0.0.0 -xp 10001 -cu myUser -cp myPass --sharenotify sharenotify_snippets/log.py --control-listen 127.0.0.1 -v
+```
+7. Now you can use the control.py scrypt to control the proxy
+```
+python2.7 control.py 127.0.0.1:10001 setbackup host=poolbackup.com port=3333 user=newUser pass=newPass
+python2.7 control.py 127.0.0.1:10001 setpool host=newpool.com port=3333 user=newUser pass=newPass
+```
 8. If you want to update the proxy, type "git pull" in the package directory.
-
-Compiling midstate C extension
-------------------------------
-For some really big operations using getwork interface of this proxy, you'll find
-useful "midstatec" C extension, which significantly speeds up midstate calculations
-(yes, plain python implementation is *so* slow). For enabling this extension,
-just type "make" in midstatec directory. Proxy will auto-detect compiled extension
-on next startup.
 
 Contact
 -------
 
-This proxy is provided by Slush's mining pool at http://mining.bitcoin.cz. You can contact the author
-by email slush(at)satoshilabs.com.
+This proxy is based on the work done by Slush (slush(at)satoshilabs.com).
+New generation version created and currently maintained by p4u (p4u(at)dabax.net)
 
 Donation
 --------
-This project helps thousands of miners to improve their mining experience and optimize bandwidth of large
-mining operations. Now it is listed on tip4commit service, so if you find this tool handy, feel free
-to throw few satoshis to the basket :-).
 
-[![tip for next commit](http://tip4commit.com/projects/322.svg)](http://tip4commit.com/projects/322)
+BTC: 1BaE7aavLF17jj618QKYFc5x6NGxk7uBkC
+
+Thanks ;)
+
