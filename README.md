@@ -34,6 +34,7 @@ but don't install the package into the system.
 6. You can start the proxy by typing "python2.7 stproxy-ng.py" in the terminal window. ``` python2.7 stproxy-ng.py -o originpool.com -p 3333 -sp 3334 -sh 0.0.0.0 -xp 10001 -cu myUser -cp myPass --sharenotify sharenotify_snippets/log.py --control-listen 127.0.0.1 -v```
 7. Now you can use the control.py scrypt to control the proxy ```python2.7 control.py 127.0.0.1:10001 setbackup host=poolbackup.com port=3333 user=newUser pass=newPass``` ```python2.7 control.py 127.0.0.1:10001 setpool host=newpool.com port=3333 user=newUser pass=newPass```
 8. If you want to update the proxy, type "git pull" in the package directory.
+9. To install the proxy in your OS type "sudo python setup.py install"
 
 Contact
 -------
